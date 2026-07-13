@@ -256,8 +256,14 @@ ShipResult GitFlow::ship(const CommitOptions& o, const Confirm& confirm,
 
     // The push is the first step that leaves this machine and the first that cannot
     // be undone quietly, so it is always asked for — unless --yes said not to.
+    //
+    // The sha goes IN the prompt: by now the commit has landed, and asking "push?"
+    // without saying so leaves the user deciding about a commit they were never told
+    // succeeded.
     if (!o.assumeYes) {
-        if (!confirm || !confirm(QStringLiteral("Push to the remote?"))) {
+        const QString prompt =
+            QStringLiteral("Committed %1. Push to the remote?").arg(res.commit.sha);
+        if (!confirm || !confirm(prompt)) {
             res.error = QStringLiteral("committed, not pushed");
             return res;
         }

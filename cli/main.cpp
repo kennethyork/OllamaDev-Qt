@@ -1086,7 +1086,18 @@ int reportCommit(const CommitResult& r) {
     return 0;
 }
 
+// Both commit and ship print a progress line before the model is asked, so the
+// "not a repo" case has to be caught here — otherwise we announce that we are
+// writing a commit message for a directory that cannot hold a commit.
+bool requireRepo() {
+    if (GitFlow::isRepo()) return true;
+    err() << "not a git repository\n";
+    err().flush();
+    return false;
+}
+
 int cmdCommit(const QStringList& args) {
+    if (!requireRepo()) return 1;
     CommitOptions o;
     o.stageAll = hasFlag(args, "-a");
     o.message = flagValue(args, "-m");
@@ -1103,6 +1114,7 @@ int cmdCommit(const QStringList& args) {
 }
 
 int cmdShip(const QStringList& args) {
+    if (!requireRepo()) return 1;
     CommitOptions o;
     o.stageAll = true;  // ship means "everything I have"
     o.message = flagValue(args, "-m");

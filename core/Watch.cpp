@@ -9,6 +9,7 @@
 #include <QFileSystemWatcher>
 #include <QHash>
 #include <QQueue>
+#include <QSet>
 #include <QTextStream>
 #include <QTimer>
 
@@ -203,29 +204,59 @@ int Watch::run(const WatchOptions& opt) {
         return 0;
     }
 
-    QHash<QString, qint64> prev = snapshot(roots);
-
-    // inotify costs a descriptor per DIRECTORY and the kernel caps it
-    // (fs.inotify.max_user_watches, 8192 by default on many distros). A monorepo
-    // blows through that, and QFileSystemWatcher's only signal is the list of paths
-    // it could NOT take — so watch that list and degrade to polling rather than
-    // silently missing changes in whatever it dropped.
     QStringList dirs;
-    snapshot(roots, &dirs);
+    QHash<QString, qint64> prev = snapshot(roots, &dirs);
+    dirs.removeDuplicates();  // overlapping roots ("watch . src") must not double-add
+
+    // WATCH THE FILES, NOT JUST THE DIRECTORIES. QFileSystemWatcher's
+    // directoryChanged only fires when an entry is ADDED, REMOVED or RENAMED —
+    // editing an existing file in place (`>>`, an in-place save, a compiler
+    // rewriting an object) changes nothing about the directory and emits NOTHING.
+    // The file itself has to be watched to hear that, so the watch set is
+    // dirs (new/deleted files) + source files (edits).
+    const auto watchSet = [&](const QHash<QString, qint64>& files, const QStringList& ds) {
+        QStringList all = ds;
+        all += files.keys();
+        all.removeDuplicates();
+        return all;
+    };
+
+    // inotify costs one watch per PATH, and that budget is PER USER and SHARED
+    // (fs.inotify.max_user_watches) — it is not ours to drain. A watcher that grabs
+    // one for every path in a monorepo does two bad things: it hits the cap and
+    // then silently misses changes in whatever it could not add, and it starves the
+    // user's editor of watches while it runs. So cap what we ask for, and fall back
+    // to polling the moment either the cap or the kernel says no. Polling is
+    // slower; it is never wrong.
+    const int cap = qMax(64, Config::integer(QStringLiteral("watch.maxWatches"), 4096));
+    const QStringList initial = watchSet(prev, dirs);
 
     QFileSystemWatcher watcher;
-    const QStringList rejected = watcher.addPaths(dirs);
-    const bool polling = !rejected.isEmpty();
+    QStringList rejected;
+    bool polling = initial.size() > cap;
+    if (!polling) {
+        rejected = watcher.addPaths(initial);
+        polling = !rejected.isEmpty();
+    }
+
     if (polling) {
-        watcher.removePaths(watcher.directories());
-        out() << dim(QStringLiteral("watching %1 dirs by polling every %2s (the kernel would "
-                                    "not take %3 more inotify watches)")
-                         .arg(dirs.size())
-                         .arg(interval)
-                         .arg(rejected.size()))
+        // Hand every watch back: half-watching a tree is worse than not watching it,
+        // because the changes it misses are invisible rather than merely late.
+        const QStringList held = watcher.directories() + watcher.files();
+        if (!held.isEmpty()) watcher.removePaths(held);
+        const QString why =
+            initial.size() > cap
+                ? QStringLiteral("%1 paths is over the %2-watch cap").arg(initial.size()).arg(cap)
+                : QStringLiteral("the kernel refused %1 of %2 inotify watches")
+                      .arg(rejected.size())
+                      .arg(initial.size());
+        out() << dim(QStringLiteral("polling every %1s — %2 · Ctrl-C to stop").arg(interval).arg(why))
               << "\n";
     } else {
-        out() << dim(QStringLiteral("watching %1 dirs · Ctrl-C to stop").arg(dirs.size())) << "\n";
+        out() << dim(QStringLiteral("watching %1 files in %2 dirs · Ctrl-C to stop")
+                         .arg(prev.size())
+                         .arg(dirs.size()))
+              << "\n";
     }
     out().flush();
 
@@ -260,18 +291,21 @@ int Watch::run(const WatchOptions& opt) {
 
         // The agent just edited files. Re-snapshot so its OWN writes do not look
         // like a change and retrigger it — that loop never ends.
-        prev = snapshot(roots);
+        QStringList freshDirs;
+        prev = snapshot(roots, &freshDirs);
 
-        // A new directory is not watched until we add it (inotify is per-dir, and
-        // an unwatched dir means its files are invisible from here on).
+        // Re-arm. Two reasons this is not optional:
+        //   * a file or directory created since we started is not watched, and an
+        //     unwatched path is invisible from here on;
+        //   * an editor that saves by writing a temp file and RENAMING it over the
+        //     original replaces the inode, and QFileSystemWatcher drops a watch whose
+        //     file was renamed away — so the second save of a file would be missed.
         if (!polling) {
-            QStringList fresh;
-            snapshot(roots, &fresh);
-            const QStringList have = watcher.directories();
+            const QStringList have = watcher.directories() + watcher.files();
             QStringList add;
-            for (const QString& d : fresh)
-                if (!have.contains(d)) add << d;
-            if (!add.isEmpty()) watcher.addPaths(add);
+            for (const QString& p : watchSet(prev, freshDirs))
+                if (!have.contains(p)) add << p;
+            if (!add.isEmpty() && have.size() + add.size() <= cap) watcher.addPaths(add);
         }
     };
 

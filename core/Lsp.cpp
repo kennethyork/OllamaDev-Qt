@@ -346,18 +346,25 @@ Diagnostic diag(int line1, int col1, const QString& msg, const QString& source, 
     return d;
 }
 
-// gcc, g++ and `rustc --error-format=short` all speak this: file:line:col: sev: msg.
-// go vet speaks it too, with a ./-relative path.
+// file:line:col: [severity:] message — what gcc, g++ and
+// `rustc --error-format=short` all emit.
+//
+// The severity token is OPTIONAL because `go vet` does not print one: its lines
+// are a bare `./main.go:5:15: fmt.Printf format %d has arg …`. Requiring
+// "error:"/"warning:" here silently matched nothing for Go and the editor got an
+// empty diagnostic list for a file vet had plenty to say about. An unlabelled
+// finding is an error — vet only speaks up when something is wrong.
 QVector<Diagnostic> parseGnuStyle(const QString& out, const QString& source) {
     QVector<Diagnostic> diags;
-    static const QRegularExpression re(
-        QStringLiteral("^(.+?):(\\d+):(\\d+):\\s*(error|warning|note)[^:]*:\\s*(.+)$"));
+    static const QRegularExpression re(QStringLiteral(
+        "^(.+?):(\\d+):(\\d+):\\s*(?:(error|warning|note)[^:]*:\\s*)?(.+)$"));
     for (const QString& line : out.split(QLatin1Char('\n'))) {
         const auto m = re.match(line);
         if (!m.hasMatch()) continue;
         const QString sev = m.captured(4);
         diags << diag(m.captured(2).toInt(), m.captured(3).toInt(), m.captured(5), source,
-                      sev == QLatin1String("error") ? 1 : (sev == QLatin1String("warning") ? 2 : 3));
+                      sev == QLatin1String("warning") ? 2
+                                                      : (sev == QLatin1String("note") ? 3 : 1));
     }
     return diags;
 }
@@ -689,13 +696,25 @@ private:
         if (word.isEmpty()) return QJsonValue(QJsonValue::Null);
         const QRegularExpression re = definitionRe(word);
 
-        // The open buffer first — it is the only text we know is current.
+        // The open buffer first — it is the only text we know is current. A hit on
+        // the cursor's OWN line is kept as a fallback rather than skipped: when the
+        // cursor is already on the declaration, "here" is the right answer, and a
+        // hard skip would make go-to-definition silently fail on every one-line
+        // definition in the file.
+        int selfLine = -1;
         for (int i = 0; i < lines.size(); ++i) {
-            const auto m = re.match(lines.at(i));
-            if (!m.hasMatch() || i == line) continue;
+            if (!re.match(lines.at(i)).hasMatch()) continue;
+            if (i == line) {
+                selfLine = i;
+                continue;
+            }
             const int col = qMax(0, lines.at(i).indexOf(word));
-            return QJsonObject{{"uri", uri},
-                               {"range", range(i, col, i, col + word.size())}};
+            return QJsonObject{{"uri", uri}, {"range", range(i, col, i, col + word.size())}};
+        }
+        if (selfLine >= 0) {
+            const int col = qMax(0, lines.at(selfLine).indexOf(word));
+            return QJsonObject{
+                {"uri", uri}, {"range", range(selfLine, col, selfLine, col + word.size())}};
         }
 
         // Then its siblings on disk. Bounded to the one directory and to files of the
