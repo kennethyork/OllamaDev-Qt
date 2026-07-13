@@ -17,7 +17,12 @@
 #include <QVector>
 #include <atomic>
 
+#include "CodeIndex.h"
 #include "Config.h"
+#include "Mcp.h"
+#include "Memory.h"
+#include "Skills.h"
+#include "WebSearch.h"
 
 namespace odv {
 namespace {
@@ -1002,6 +1007,297 @@ ToolResult toolExitPlanMode(const QJsonObject& a) {
                     .arg(Permission::modeName(back)));
 }
 
+// ------------------------------------------------------------ skills & memory
+
+// The payoff of progressive disclosure: the system prompt carries only each
+// skill's name+description, and THIS is how the model pulls a body — one skill,
+// once, when it decides the skill applies.
+ToolResult toolSkill(const QJsonObject& a) {
+    const QString name = argStr(a, {"name", "skill"}).trimmed();
+    const QStringList have = Skills::names();
+    const QString available =
+        have.isEmpty() ? QStringLiteral("(none)") : have.join(QStringLiteral(", "));
+
+    if (name.isEmpty())
+        return okay(QStringLiteral("Usage: skill(name). Available skills: %1").arg(available));
+
+    const Skill s = Skills::get(name);
+    if (s.isNull())
+        return okay(QStringLiteral("No skill named '%1'. Available: %2").arg(name, available));
+
+    QString out = QStringLiteral("# Skill: %1\n%2\n\n%3").arg(s.name, s.description, s.body);
+    if (!s.files.isEmpty())
+        out += QStringLiteral("\n\n(Helper files in %1: %2 — read them with the view tool if "
+                              "needed.)")
+                   .arg(s.dir, s.files.join(QStringLiteral(", ")));
+    return okay(out);
+}
+
+ToolResult toolRecall(const QJsonObject& a) {
+    const QString slug = argStr(a, {"slug"}).trimmed();
+    const QString query = argStr(a, {"query"}).trimmed();
+
+    if (!slug.isEmpty()) {
+        const MemoryNote m = Memory::get(slug);
+        if (m.isNull()) {
+            const QString idx = Memory::index();
+            return okay(QStringLiteral("No memory '%1'. %2")
+                            .arg(slug, idx.isEmpty() ? QStringLiteral("Memory is empty.")
+                                                     : QStringLiteral("Known:\n") + idx));
+        }
+        QString out = QStringLiteral("# %1  (%2)").arg(m.title, m.slug);
+        if (!m.tags.isEmpty())
+            out += QStringLiteral("  tags: %1").arg(m.tags.join(QStringLiteral(", ")));
+        out += QLatin1Char('\n') + m.body.trimmed();
+        if (!m.links.isEmpty()) {
+            QStringList wiki;
+            for (const QString& l : m.links) wiki << QStringLiteral("[[%1]]").arg(l);
+            out += QStringLiteral("\nLinks: %1").arg(wiki.join(QStringLiteral(", ")));
+        }
+        return okay(out);
+    }
+
+    if (!query.isEmpty()) {
+        const auto hits = Memory::search(query);
+        if (hits.isEmpty())
+            return okay(QStringLiteral("No memories match '%1'.").arg(query));
+        QString out = QStringLiteral("Memories matching '%1':\n").arg(query);
+        for (const MemoryNote& m : hits)
+            out += QStringLiteral("- %1 — %2\n").arg(m.slug, m.title);
+        return okay(out + QStringLiteral("Read one with recall(slug)."));
+    }
+
+    const QString idx = Memory::index();
+    if (idx.isEmpty())
+        return okay(QStringLiteral("Memory is empty. Save facts with the remember tool."));
+    return okay(QStringLiteral("Project memory:\n%1\nRead one with recall(slug), or search with "
+                               "recall(query).")
+                    .arg(idx));
+}
+
+ToolResult toolRemember(const QJsonObject& a) {
+    QString title = argStr(a, {"title"}).trimmed();
+    const QString content = argStr(a, {"content", "body"});
+    if (title.isEmpty() && content.trimmed().isEmpty())
+        return fail(QStringLiteral("remember needs a title and content."));
+
+    if (title.isEmpty()) {
+        static const QRegularExpression ws(QStringLiteral("\\s+"));
+        title = content.trimmed();
+        title.replace(ws, QStringLiteral(" "));
+        title = title.left(48);
+    }
+
+    // Models send tags either as a real array or as "a, b" — accept both.
+    QStringList tags;
+    const QJsonValue tv = a.value(QStringLiteral("tags"));
+    if (tv.isArray()) {
+        const auto arr = tv.toArray();
+        for (const QJsonValue& v : arr) {
+            const QString t = v.toString().trimmed();
+            if (!t.isEmpty()) tags << t;
+        }
+    } else if (tv.isString()) {
+        const auto parts =
+            tv.toString().split(QRegularExpression(QStringLiteral("[,;]")), Qt::SkipEmptyParts);
+        for (const QString& p : parts)
+            if (!p.trimmed().isEmpty()) tags << p.trimmed();
+    }
+
+    const QString slug = Memory::save(title, content, tags, argStr(a, {"slug"}));
+    return okay(QStringLiteral("Saved memory '%1' (\"%2\"). Link to it from other notes with "
+                               "[[%1]].")
+                    .arg(slug, title));
+}
+
+// ------------------------------------------------------------- network tools
+
+// Both network tools answer to TWO gates: Permission (they are registered with
+// mutates=true, so a read-only/plan session — and an MCP client, which defaults
+// to read-only — cannot reach the network at all) and the web kill switch below
+// (`--no-web`, config web.enabled). Egress is a side effect on the world even
+// when nothing on disk changes.
+ToolResult toolSearch(const QJsonObject& a) {
+    const QString q = argStr(a, {"query", "q"}).trimmed();
+    if (q.isEmpty()) return fail(QStringLiteral("missing required parameter 'query'"));
+    if (!WebSearch::webEnabled())
+        return fail(QStringLiteral("web access is off (--no-web / web.enabled=false) — "
+                                   "search is unavailable in this run"));
+    // A separate switch from web.enabled: it silences SEARCH while leaving fetch
+    // usable, for a user who wants the agent to read URLs they name but not to go
+    // looking for its own.
+    if (!Config::boolean(QStringLiteral("search.enabled"), true))
+        return fail(QStringLiteral("Web search is disabled (search.enabled is false). Enable it "
+                                   "with: ollamadev config set search.enabled true"));
+
+    const int limit = argInt(a, {"limit"}, 5);
+    const SearchResult r = WebSearch::search(q, limit, argStr(a, {"provider"}));
+    if (!r.ok)
+        return fail(r.error.isEmpty() ? QStringLiteral("no results for: %1").arg(q)
+                                      : QStringLiteral("search failed: %1").arg(r.error));
+
+    QString out = QStringLiteral("Web search results for \"%1\" (%2):\n\n").arg(q, r.provider);
+    int i = 0;
+    for (const SearchHit& h : r.hits) {
+        out += QStringLiteral("%1. %2\n   %3\n").arg(++i).arg(h.title, h.url);
+        if (!h.snippet.isEmpty()) out += QStringLiteral("   %1\n").arg(h.snippet);
+        out += QLatin1Char('\n');
+    }
+    return okay(out.trimmed());
+}
+
+ToolResult toolFetch(const QJsonObject& a) {
+    const QString url = argStr(a, {"url"}).trimmed();
+    if (url.isEmpty()) return fail(QStringLiteral("missing required parameter 'url'"));
+    if (!WebSearch::webEnabled())
+        return fail(QStringLiteral("web access is off (--no-web / web.enabled=false) — "
+                                   "fetch is unavailable in this run"));
+
+    const FetchedPage p = WebSearch::fetch(url, argInt(a, {"timeout"}, 30));
+    if (!p.ok) return fail(QStringLiteral("failed to fetch %1: %2").arg(url, p.error));
+    if (p.text.trimmed().isEmpty())
+        return okay(QStringLiteral("(no readable text at %1 — HTTP %2)").arg(url).arg(p.status));
+    return okay(p.text);
+}
+
+// ---------------------------------------------------------------- code_search
+
+ToolResult toolCodeSearch(const QJsonObject& a) {
+    const QString q = argStr(a, {"query", "q"}).trimmed();
+    if (q.isEmpty()) return fail(QStringLiteral("missing required parameter 'query'"));
+    const int limit = qBound(1, argInt(a, {"limit"}, 8), 20);
+
+    const SearchReport r = CodeIndex::search(q, limit);
+    if (!r.ok) {
+        if (r.error == QLatin1String("no_index"))
+            return fail(QStringLiteral("No semantic index yet. Build it first: ollamadev index build"));
+        if (r.error == QLatin1String("embed_failed"))
+            return fail(QStringLiteral("Embedding failed — is the model installed? Run: ollama pull %1")
+                            .arg(CodeIndex::model()));
+        return fail(QStringLiteral("code_search failed"));
+    }
+    if (r.hits.isEmpty()) return okay(QStringLiteral("No matches."));
+
+    QString out = QStringLiteral("Semantically closest code for \"%1\":\n\n").arg(q);
+    for (const IndexHit& h : r.hits) {
+        out += QStringLiteral("%1:%2-%3  (score %4)\n")
+                   .arg(h.file)
+                   .arg(h.start)
+                   .arg(h.end)
+                   .arg(h.score, 0, 'f', 3);
+        for (const QString& line : h.snippet.split(QLatin1Char('\n')))
+            out += QStringLiteral("    %1\n").arg(line);
+        out += QLatin1Char('\n');
+    }
+    return okay(out.trimmed());
+}
+
+// ------------------------------------------------------------------ run_tests
+
+struct TestCmd {
+    QString cmd;
+    QString label;
+};
+
+// How does THIS project run its tests? `test.command` overrides everything.
+//
+// FLAGS: every flag below was checked against the tool's own --help before being
+// written down (ctest --test-dir/--output-on-failure, pytest -q). Nothing here is
+// recalled from memory — that is exactly how the PHP shipped dead flags for three
+// different CLIs.
+bool detectTests(TestCmd* out) {
+    const QString override = Config::str(QStringLiteral("test.command")).trimmed();
+    if (!override.isEmpty()) {
+        *out = TestCmd{override, QStringLiteral("config")};
+        return true;
+    }
+
+    const QString root = Tools::threadRoot();
+    auto has = [&root](const char* rel) {
+        return QFileInfo::exists(root + QLatin1Char('/') + QLatin1String(rel));
+    };
+    auto isDir = [&root](const char* rel) {
+        return QFileInfo(root + QLatin1Char('/') + QLatin1String(rel)).isDir();
+    };
+
+    // A configured CMake build tree is the strongest signal, and it is this very
+    // project's shape.
+    if (has("CMakeLists.txt") && isDir("build")) {
+        *out = TestCmd{QStringLiteral("ctest --test-dir build --output-on-failure"),
+                       QStringLiteral("ctest")};
+        return true;
+    }
+    if (has("phpunit.xml") || has("phpunit.xml.dist")) {
+        *out = TestCmd{has("vendor/bin/phpunit") ? QStringLiteral("./vendor/bin/phpunit")
+                                                 : QStringLiteral("phpunit"),
+                       QStringLiteral("phpunit")};
+        return true;
+    }
+    if (has("composer.json")) {
+        QFile f(root + QStringLiteral("/composer.json"));
+        if (f.open(QIODevice::ReadOnly)) {
+            const QJsonObject cj = QJsonDocument::fromJson(f.readAll()).object();
+            f.close();
+            if (cj.value(QStringLiteral("scripts")).toObject().contains(QStringLiteral("test"))) {
+                *out = TestCmd{QStringLiteral("composer test"), QStringLiteral("composer")};
+                return true;
+            }
+        }
+    }
+    if (has("go.mod")) {
+        *out = TestCmd{QStringLiteral("go test ./..."), QStringLiteral("go")};
+        return true;
+    }
+    if (has("Cargo.toml")) {
+        *out = TestCmd{QStringLiteral("cargo test"), QStringLiteral("cargo")};
+        return true;
+    }
+    if (has("pytest.ini") || has("tox.ini") || has("pyproject.toml") || has("setup.cfg") ||
+        isDir("tests")) {
+        *out = TestCmd{QStringLiteral("pytest -q"), QStringLiteral("pytest")};
+        return true;
+    }
+    if (has("Makefile") || has("makefile")) {
+        QFile f(root + QStringLiteral("/") +
+                (has("Makefile") ? QStringLiteral("Makefile") : QStringLiteral("makefile")));
+        if (f.open(QIODevice::ReadOnly)) {
+            const QString mk = QString::fromUtf8(f.readAll());
+            f.close();
+            static const QRegularExpression target(QStringLiteral("^test:"),
+                                                   QRegularExpression::MultilineOption);
+            if (target.match(mk).hasMatch()) {
+                *out = TestCmd{QStringLiteral("make test"), QStringLiteral("make")};
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+ToolResult toolRunTests(const QJsonObject&) {
+    TestCmd t;
+    if (!detectTests(&t))
+        return fail(QStringLiteral("No test command detected for this project. Set test.command in "
+                                   "config to enable."));
+
+    const ShellOut r = runShell(t.cmd, Tools::threadRoot(),
+                                Config::integer(QStringLiteral("test.timeout"), 600));
+
+    // Only the tail matters: a failing suite's useful part is at the end, and a
+    // full run can be tens of thousands of lines.
+    QStringList lines = r.text.split(QLatin1Char('\n'));
+    const bool clipped = lines.size() > 80;
+    if (clipped) lines = lines.mid(lines.size() - 80);
+
+    const QString head = r.exitCode == 0
+                             ? QStringLiteral("TESTS PASSED")
+                             : QStringLiteral("TESTS FAILED (exit %1)").arg(r.exitCode);
+    return okay(QStringLiteral("%1  [%2]\n\n%3%4")
+                    .arg(head, t.cmd,
+                         clipped ? QStringLiteral("…(showing the last 80 lines)\n") : QString(),
+                         lines.join(QLatin1Char('\n'))));
+}
+
 }  // namespace
 
 void Tools::registerAll() {
@@ -1011,11 +1307,6 @@ void Tools::registerAll() {
     r.populated = true;
 
     // TODO: not yet ported from the PHP registry (src/65-tools-register.php):
-    //   search, fetch      — need an HTTP client + the web-access permission gate
-    //   code_search        — needs the local embedding index
-    //   run_tests          — needs the test-runner autodetect
-    //   skill              — needs the Skills catalog
-    //   recall, remember   — need the graph-memory store
     //   task               — needs the nested subagent runner
     //   clear_board        — needs Board/Crew, and must stay refused mid-run
 
@@ -1142,6 +1433,89 @@ void Tools::registerAll() {
                                                    "in markdown."))}},
                           {QStringLiteral("plan")}),
                    false, toolExitPlanMode});
+
+    // Skills + graph memory. The system prompt lists only skill names and memory
+    // slugs; these three tools are how the model pulls the actual content, and
+    // are the whole reason a 9b local model can work with a large skill library
+    // without drowning in it.
+    add(r, ToolDef{QStringLiteral("skill"),
+                   QStringLiteral("Load a skill's full instructions on demand. Call this as soon "
+                                  "as a listed skill applies to the task, BEFORE you start."),
+                   params(QJsonObject{{"name", strProp(QStringLiteral(
+                                                   "Name of the skill to load, as listed in the "
+                                                   "skills catalog"))}},
+                          {QStringLiteral("name")}),
+                   false, toolSkill});
+
+    add(r, ToolDef{QStringLiteral("recall"),
+                   QStringLiteral("Read project memory: with no argument, list what is remembered; "
+                                  "with slug, read one note in full; with query, search notes."),
+                   params(QJsonObject{{"slug", strProp(QStringLiteral("Read this note in full"))},
+                                      {"query", strProp(QStringLiteral(
+                                                    "Search notes by title, tag, or content"))}},
+                          {}),
+                   false, toolRecall});
+
+    add(r, ToolDef{QStringLiteral("remember"),
+                   QStringLiteral("Persist a durable, reusable fact about this project (an "
+                                  "architecture decision, a convention, a gotcha). Link related "
+                                  "notes with [[slug]]. Not for transient task details."),
+                   params(QJsonObject{{"title", strProp(QStringLiteral("Short title for the note"))},
+                                      {"content", strProp(QStringLiteral(
+                                                      "The fact, in 1-3 sentences. Use [[slug]] to "
+                                                      "link related notes."))},
+                                      {"tags", strProp(QStringLiteral(
+                                                   "Optional comma-separated tags"))}},
+                          {QStringLiteral("content")}),
+                   true, toolRemember});
+
+    // ---- network ----------------------------------------------------------
+    // mutates=true is deliberate for both. Nothing on disk changes, but the query
+    // (or the URL) LEAVES THE MACHINE, and that is a side effect a read-only or
+    // plan-mode session never agreed to. It is also what stops an MCP client —
+    // read-only by default — from using us as an open web proxy.
+
+    add(r, ToolDef{QStringLiteral("search"),
+                   QStringLiteral("Search the web and return result titles, URLs, and snippets."),
+                   params(QJsonObject{{"query", strProp(QStringLiteral("What to search for"))},
+                                      {"limit", intProp(QStringLiteral("Max results, 1-10 (default 5)"))},
+                                      {"provider", strProp(QStringLiteral(
+                                                       "duckduckgo | searxng | brave (default: "
+                                                       "config search.provider)"))}},
+                          {QStringLiteral("query")}),
+                   true, toolSearch});
+
+    add(r, ToolDef{QStringLiteral("fetch"),
+                   QStringLiteral("Fetch a URL over HTTP(S) and return its readable text."),
+                   params(QJsonObject{{"url", strProp(QStringLiteral("The URL to fetch"))},
+                                      {"timeout", intProp(QStringLiteral("Seconds (default 30)"))}},
+                          {QStringLiteral("url")}),
+                   true, toolFetch});
+
+    // ---- local semantic index ---------------------------------------------
+    add(r, ToolDef{QStringLiteral("code_search"),
+                   QStringLiteral("Search THIS repository by meaning rather than by literal text — "
+                                  "use it when you do not know the exact identifier to grep for. "
+                                  "Requires `ollamadev index build` first."),
+                   params(QJsonObject{{"query", strProp(QStringLiteral(
+                                                    "What the code should DO, in plain words"))},
+                                      {"limit", intProp(QStringLiteral("Max hits, 1-20 (default 8)"))}},
+                          {QStringLiteral("query")}),
+                   false, toolCodeSearch});
+
+    // Running a suite executes arbitrary project code (and its build), so it is a
+    // mutation, not a read.
+    add(r, ToolDef{QStringLiteral("run_tests"),
+                   QStringLiteral("Detect and run this project's test suite; returns pass/fail and "
+                                  "the tail of the output."),
+                   params(QJsonObject{}, {}),  // no parameters → MUST be {}: see the QUIRK in Tools.h
+                   true, toolRunTests});
+
+    // ---- MCP ---------------------------------------------------------------
+    // Tools discovered on the servers in config `mcpServers`, registered as
+    // first-class tools so the model calls a remote one exactly like a local one.
+    // Returns immediately, spawning nothing, when no servers are configured.
+    for (const ToolDef& d : Mcp::discoverTools()) add(r, d);
 }
 
 const ToolDef* Tools::find(const QString& name) {

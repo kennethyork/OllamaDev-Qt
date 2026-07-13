@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OllamaDev ADE
+GenericName=AI Coding Agent
+Comment=Local AI coding agent — Ollama and every major coding CLI, in parallel
+Exec=ollamadev-ade %F
+TryExec=ollamadev-ade
+Icon=ollamadev-ade
+Terminal=false
+Categories=Development;IDE;
+Keywords=AI;Ollama;agent;coding;LLM;
+StartupWMClass=ollamadev-ade

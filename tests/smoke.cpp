@@ -166,9 +166,14 @@ static void testNoGlobalProcessNuking() {
     // Here every Pty is a child QObject of the widget that spawned it, so there is
     // nothing global to clean. Keep it that way.
     bool clean = true;
+    // core/Stt.cpp is in this list for the same reason: the PHP recorder
+    // backgrounded `arecord` through a shell and stopped it with `kill -INT
+    // <scraped pid>`. The port spawns it as a QProcess child and terminates that
+    // handle, so a kill-by-name here would be the same class of bug returning.
     for (const QString& f : {QStringLiteral("ade/MainWindow.cpp"),
                              QStringLiteral("ade/TerminalWidget.cpp"),
-                             QStringLiteral("ade/main.cpp"), QStringLiteral("core/Pty.cpp")}) {
+                             QStringLiteral("ade/main.cpp"), QStringLiteral("core/Pty.cpp"),
+                             QStringLiteral("core/Stt.cpp")}) {
         const QString src = readSource(f);
         if (src.isEmpty()) {
             clean = false;
@@ -182,6 +187,36 @@ static void testNoGlobalProcessNuking() {
         }
     }
     check(clean, "no instance-global process kill (2nd ADE must not kill the 1st's terminals)");
+}
+
+static void testCliBackendIsSandboxed() {
+    // A CLI backend is an agent in a subprocess: it does its OWN file edits, so
+    // the thread-local tool root cannot confine it. Its working directory IS its
+    // sandbox. Pointing it at the process cwd let a crew coder write straight
+    // into the user's real project, bypassing the changeset, the auditor, the
+    // secret gate and the overlap guard at once. Caught by a live mixed crew.
+    const QString src = readSource(QStringLiteral("core/CliBackend.cpp"));
+    check(src.contains("Tools::threadRoot()"),
+          "CLI backends run in the coder's sandbox, not the process cwd");
+    check(!src.contains("setWorkingDirectory(QDir::currentPath())"),
+          "CLI backend never hardcodes the project root as its working directory");
+}
+
+static void testPerBackendModelRouting() {
+    // A model tag belongs to exactly ONE backend. Two ways this broke a live
+    // mixed crew, both caught by running one:
+    //  1. inheriting the session's Ollama tag for a Claude/Codex coder — that
+    //     CLI rejects the run with "model may not exist";
+    //  2. `--coder-models tag,,` parsed with SkipEmptyParts collapsing to a
+    //     one-element list, so the round-robin wrapped and handed coder 2 the
+    //     Ollama tag anyway. These lists are POSITIONAL: entry i is coder i.
+    const QString crew = readSource(QStringLiteral("core/Crew.cpp"));
+    check(crew.contains("modelFor("),
+          "each crew role resolves its model against its OWN backend");
+
+    const QString cli = readSource(QStringLiteral("cli/main.cpp"));
+    check(!cli.contains("v.split(',', Qt::SkipEmptyParts)"),
+          "positional --coder-* lists keep empty slots (they mean 'backend default')");
 }
 
 static void testCliArgvIsCurrent() {
@@ -210,7 +245,7 @@ int main(int argc, char** argv) {
     s << "sandbox\n";    s.flush(); testSandbox();
     s << "parallel\n";   s.flush(); testLimiter();
     s << "backends\n";   s.flush(); testBackends();
-    s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent();
+    s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent(); testCliBackendIsSandboxed(); testPerBackendModelRouting();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

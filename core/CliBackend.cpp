@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "Tools.h"  // Tools::threadRoot() — the sandbox this coder is confined to
+
 #include "Config.h"
 #include "Json.h"
 
@@ -277,7 +279,19 @@ ChatTurn CliBackend::chat(const QString& model, const QVector<ChatMessage>& mess
     // need an event loop — so this is safe on the crew's plain worker threads,
     // and each call owns its own QProcess.
     QProcess proc;
-    proc.setWorkingDirectory(QDir::currentPath());
+    // SECURITY: a CLI backend is an agent in a subprocess — it does its OWN file
+    // edits, so our thread-local tool root cannot confine it. Its working
+    // directory IS its sandbox, and that is the only thing standing between a
+    // crew coder and the user's real project.
+    //
+    // Getting this wrong is not a cosmetic bug: pointing it at the project root
+    // would let a CLI coder write straight into the user's tree, bypassing the
+    // changeset capture, the auditor, the secret gate and the overlap guard all
+    // at once. Tools::threadRoot() is the sandbox the crew assigned this thread;
+    // fall back to cwd only for a plain one-shot chat, where there is no sandbox
+    // and the project root is genuinely what the user asked for.
+    const QString root = Tools::hasThreadRoot() ? Tools::threadRoot() : QDir::currentPath();
+    proc.setWorkingDirectory(root);
     proc.setProcessChannelMode(QProcess::SeparateChannels);
 
     // Child processes inherit our PATH, and a GUI-launched app's PATH is often

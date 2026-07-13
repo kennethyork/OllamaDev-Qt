@@ -17,6 +17,7 @@
 #include "Models.h"
 #include "Parallel.h"
 #include "SecScan.h"
+#include "Skills.h"
 #include "Tools.h"
 
 namespace odv {
@@ -91,13 +92,22 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     auto backendFor = [&](const QString& want) {
         return want.isEmpty() ? sessionBackend : want;
     };
+    // A model tag belongs to exactly one backend, so the session default may only
+    // be inherited by a role that is actually ON the session's backend. Give an
+    // Ollama tag to a Claude or Codex role and that CLI rejects the whole run.
+    auto modelFor = [&](const QString& backendId, const QString& want) -> QString {
+        if (!want.isEmpty()) return want;
+        if (backendId == sessionBackend) return sessionModel;
+        auto b = Backends::get(backendId);
+        return b ? b->defaultModel() : QString();
+    };
 
     // ---- Researcher (read-only, shared context for everyone downstream) ----
     QString research;
     if (opts.research && !cancel.cancelled()) {
         phase("research", "investigating the codebase");
-        Agent r(backendFor(opts.researcherBackend),
-                opts.researcherModel.isEmpty() ? sessionModel : opts.researcherModel);
+        const QString rb = backendFor(opts.researcherBackend);
+        Agent r(rb, modelFor(rb, opts.researcherModel));
         Permission::setMode(PermMode::ReadOnly);
         Permission::setInteractive(false);
         QVector<ChatMessage> msgs{
@@ -116,14 +126,17 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const int maxCoders = qBound(1, opts.maxCoders, 8);
     QVector<Subtask> subs;
     {
-        Agent d(backendFor(opts.directorBackend),
-                opts.directorModel.isEmpty() ? sessionModel : opts.directorModel);
+        const QString db = backendFor(opts.directorBackend);
+        Agent d(db, modelFor(db, opts.directorModel));
         QString sys = QStringLiteral(
             "You are the Director. Decompose the task into at most %1 INDEPENDENT subtasks that, "
             "wherever possible, touch DIFFERENT files so they can be built in parallel without "
             "conflicting. Reply with JSON only: "
             "{\"subtasks\":[{\"title\":\"...\",\"role\":\"coder\",\"prompt\":\"...\"}]}")
                           .arg(maxCoders);
+        // The Director can only assign a role it knows exists; an invented one
+        // falls back to 'coder' in CrewRoles::get().
+        sys += "\n\nAssign each subtask the most fitting role:\n" + CrewRoles::catalog();
         QString usr = "Task: " + opts.task;
         if (!opts.focus.isEmpty()) usr += "\nFocus: " + opts.focus;
         if (!research.isEmpty()) usr += "\n\nResearch findings:\n" + research.left(6000);
@@ -163,8 +176,23 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             s.prompt = o.value("prompt").toString(s.title);
             s.state = "todo";
             s.backend = backendFor(pick(opts.coderBackends, s.n - 1, opts.coderBackend));
-            s.model = pick(opts.coderModels, s.n - 1,
-                           opts.coderModel.isEmpty() ? sessionModel : opts.coderModel);
+
+            // A model tag belongs to exactly ONE backend. The session default is
+            // an Ollama tag, so handing it to a Claude or Codex coder makes that
+            // CLI reject the run outright ("model may not exist"). Only inherit
+            // the session model when the coder is on the session's backend;
+            // otherwise ask that backend for its own default.
+            s.model = pick(opts.coderModels, s.n - 1, opts.coderModel);
+            if (s.model.isEmpty()) {
+                const QString pinned = CrewRoles::get(s.role).model;
+                if (!pinned.isEmpty()) {
+                    s.model = pinned;
+                } else if (s.backend == sessionBackend) {
+                    s.model = sessionModel;
+                } else if (auto b = Backends::get(s.backend)) {
+                    s.model = b->defaultModel();
+                }
+            }
             if (!s.title.isEmpty()) subs.append(s);
         }
     }
@@ -205,6 +233,11 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const QString csRoot = Config::dataDir() + "/crew/" + runId + "/changeset";
     QVector<QString> sandboxes(subs.size());
     QVector<QString> stores(subs.size());
+    // Starter skills whose triggers match this crew's focus. They are written into
+    // each sandbox, where the coder discovers them as ordinary project skills and
+    // pulls each body on demand via the `skill` tool — the system prompt only ever
+    // sees their names. A user skill of the same name is never overwritten.
+    const QVector<SkillSpec> starters = CrewSkills::resolve(opts.focus);
     {
         QVector<int> idx(subs.size());
         for (int i = 0; i < subs.size(); ++i) idx[i] = i;
@@ -217,8 +250,14 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 stores[i] = csRoot + QStringLiteral("/c%1").arg(i + 1);
                 QString err;
                 Sandbox::copyTree(projectRoot, sandboxes[i], &err);
+                CrewSkills::materialize(starters, sandboxes[i]);
                 return QJsonObject{{"err", err}};
             });
+    }
+    if (!starters.isEmpty() && ev.onLog) {
+        QStringList names;
+        for (const SkillSpec& s : starters) names << s.name;
+        ev.onLog(QStringLiteral("skills: %1").arg(names.join(QStringLiteral(", "))));
     }
 
     // ---- Coders, genuinely in parallel ------------------------------------
@@ -236,6 +275,10 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             if (ev.onCoderState) ev.onCoderState(st.n, "doing");
             publishBoard(runId, opts.task, subs, true);
 
+            // mkpath, not just open: with --no-research nothing else has created
+            // the run dir yet, and QFile::open(Append) will not create it — so the
+            // coder logs silently went nowhere, which is precisely when you need them.
+            QDir().mkpath(runDir(runId));
             const QString log = runDir(runId) + QStringLiteral("/coder-%1.log").arg(st.n);
 
             // Each coder is chrooted-by-convention into its own copy: the tools
@@ -248,6 +291,16 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             QString sys = a.buildSystemPrompt(sandboxes[i]);
             sys += "\n\nYou are Coder #" + QString::number(st.n) +
                    ". Work ONLY inside your assigned subtask. Make the edits directly.";
+            // The persona the Director assigned. Unknown roles resolve to 'coder',
+            // so a hallucinated role never leaves a coder without instructions.
+            sys += CrewRoles::persona(st.role);
+            // Name-and-description only — the bodies stay on disk until the model
+            // asks for one with the `skill` tool. Rooted at the SANDBOX, which is
+            // where this coder's starters were just materialised.
+            const QString skills = Skills::catalogFor(sandboxes[i]);
+            if (!skills.isEmpty())
+                sys += "\n\nSKILLS available (load one with the skill tool before you start if it "
+                       "applies):\n" + skills;
             QString usr = "Overall goal: " + opts.task + "\n\nYour subtask: " + st.title + "\n" +
                           st.prompt;
             if (!research.isEmpty()) usr += "\n\nShared research:\n" + research.left(4000);
@@ -265,7 +318,16 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             // Thread-local, NOT QDir::setCurrent — cwd is process-wide and
             // parallel coders would stomp each other into the wrong sandbox.
             Tools::setThreadRoot(sandboxes[i]);
-            a.loop(msgs, Config::integer("crew.coderIterations", 10), sink, cancel);
+            const QString finalText =
+                a.loop(msgs, Config::integer("crew.coderIterations", 10), sink, cancel);
+
+            // A CLI backend streams nothing through the sink (it is a subprocess
+            // running its own loop), so without this its log would be empty and a
+            // failure would be invisible.
+            if (!finalText.isEmpty()) {
+                QFile f(log);
+                if (f.open(QIODevice::Append)) f.write(finalText.toUtf8() + "\n");
+            }
 
             CoderResult r;
             r.n = st.n;
@@ -286,7 +348,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     if (opts.audit && !cancel.cancelled()) {
         phase("audit", "reviewing every changeset");
         const QString ab = backendFor(opts.auditorBackend);
-        const QString am = opts.auditorModel.isEmpty() ? sessionModel : opts.auditorModel;
+        const QString am = modelFor(ab, opts.auditorModel);
         parallelRun(
             results.size(), [&](int) { return limiterKey(ab, am); },
             [&](int i) -> QJsonObject {
