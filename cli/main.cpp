@@ -85,20 +85,32 @@ QStringList positionals(const QStringList& a) {
 void printHelp() {
     out() << "OllamaDev " << ODV_VERSION << " — Ollama and every major coding CLI, in parallel\n\n"
           << "Usage: ollamadev [command] [options]\n\n"
+          << "  ollamadev                    interactive chat (-c resumes this folder's session)\n"
           << "  ollamadev \"<prompt>\"        one-shot agent turn\n"
           << "  ollamadev backends           which providers are installed and how wide they run\n"
           << "  ollamadev models             list models on the active backend\n"
-          << "  ollamadev crew \"<task>\"      the parallel bench (research → plan → N coders → audit)\n"
+          << "  ollamadev doctor             health check\n\n"
+          << "Crew — the parallel bench (research → plan → N coders → audit → land):\n"
+          << "  ollamadev crew \"<task>\"\n"
           << "  ollamadev crew accept <n>    apply held work into your folder\n"
           << "  ollamadev crew discard <n>   throw held work away\n"
           << "  ollamadev crew steer <n> \"…\" talk to a running coder\n"
-          << "  ollamadev board              pending decisions\n"
+          << "  ollamadev crew role|pack     personas the Director assigns · saved crew configs\n"
+          << "  ollamadev board              pending decisions\n\n"
+          << "Context:\n"
+          << "  ollamadev index build        semantic code index (also: status, clear)\n"
+          << "  ollamadev code-search \"<q>\"  search the repo by meaning\n"
+          << "  ollamadev search \"<q>\"       web search\n"
+          << "  ollamadev skills             progressive-disclosure skills (list/add/install)\n"
+          << "  ollamadev memory             wiki-linked notes (new/list/show/graph)\n\n"
+          << "Integration:\n"
+          << "  ollamadev mcp serve          expose these tools to any MCP client (stdio)\n"
+          << "  ollamadev mcp list|add|rm    MCP servers this agent can call\n"
           << "  ollamadev scan [path]        secret scanner (exit 1 on a high finding)\n"
           << "  ollamadev voice              record the mic and transcribe it (100% local)\n"
           << "                               --setup fetch the engine · --model <size> ·\n"
           << "                               --history [n] · --clear\n"
-          << "  ollamadev transcribe <file>  transcribe an audio file\n"
-          << "  ollamadev doctor             health check\n\n"
+          << "  ollamadev transcribe <file>  transcribe an audio file\n\n"
           << "Options:\n"
           << "  --backend <id>               ollama | claude | codex | gemini | cursor-agent |\n"
           << "                               opencode | qwen | aider | goose | amp | crush | droid\n"
@@ -110,7 +122,11 @@ void printHelp() {
           << "  --director-backend/-model, --auditor-backend/-model, --researcher-backend/-model\n"
           << "  --review                     hold everything for review instead of auto-applying\n"
           << "  --no-research, --no-audit\n"
-          << "  --focus \"<text>\"\n";
+          << "  --no-web                     block every network tool for this run\n"
+          << "  --focus \"<text>\"\n\n"
+          << "A model tag belongs to one backend, so the --coder-* lists are positional:\n"
+          << "  --coder-backends ollama,claude,codex --coder-models qwen3.5:9b,,\n"
+          << "  (coder 1 on qwen; coders 2 and 3 on their own backend's default)\n";
     out().flush();
 }
 
@@ -1036,6 +1052,8 @@ int main(int argc, char** argv) {
         return cmdCrew(rest);
     }
 
-    // Anything else is a prompt.
-    return cmdOneShot(args.join(' '), args);
+    // Anything else is a prompt — the POSITIONAL words only. args.join(' ') would
+    // splice the flags into the prompt itself, so `ollamadev -m qwen3.5:9b fix the
+    // parser` asked the model to fix "-m qwen3.5:9b fix the parser".
+    return cmdOneShot(positionals(args).join(' '), args);
 }

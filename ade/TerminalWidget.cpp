@@ -262,7 +262,8 @@ void TerminalWidget::paintEvent(QPaintEvent* e) {
 
             QString run;
             run.reserve(c2 - c);
-            for (int i = c; i < c2; ++i) run.append(i < len ? row[i].ch : QLatin1Char(' '));
+            for (int i = c; i < c2; ++i)
+                run.append(i < len ? QString::fromUcs4(&row[i].ch, 1) : QStringLiteral(" "));
 
             if (!run.trimmed().isEmpty()) {
                 const bool bold = base.attrs & AttrBold;
@@ -295,7 +296,8 @@ void TerminalWidget::paintEvent(QPaintEvent* e) {
                 p.fillRect(box, defFg_);
                 p.setFont(font_);
                 p.setPen(defBg_);
-                p.drawText(QPointF(box.left(), cy * cellH_ + baseline_), QString(under.ch));
+                p.drawText(QPointF(box.left(), cy * cellH_ + baseline_),
+                           QString::fromUcs4(&under.ch, 1));
             } else {
                 p.setPen(defFg_);
                 p.drawRect(box.adjusted(0, 0, -1, -1));
@@ -436,7 +438,8 @@ QString TerminalWidget::selectionText() const {
         const int c0 = (line == a.y()) ? a.x() : 0;
         const int c1 = (line == b.y()) ? b.x() : vt_.cols();  // exclusive
         QString s;
-        for (int c = c0; c < c1 && c < len; ++c) s.append(row ? row[c].ch : QLatin1Char(' '));
+        for (int c = c0; c < c1 && c < len; ++c)
+            s.append(row ? QString::fromUcs4(&row[c].ch, 1) : QStringLiteral(" "));
         while (s.endsWith(QLatin1Char(' '))) s.chop(1);
         out.append(s);
     }

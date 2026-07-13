@@ -317,7 +317,7 @@ void VtParser::putChar(uint cp) {
     }
     Cell* c = cellAt(cx_, cy_);
     if (!c) return;
-    c->ch = (cp > 0xFFFF) ? QChar(QChar::ReplacementCharacter) : QChar(ushort(cp));
+    c->ch = char32_t(cp);
     c->fg = pen_.fg;
     c->bg = pen_.bg;
     c->attrs = pen_.attrs;
@@ -691,7 +691,7 @@ QString VtParser::textAt(int x0, int y0, int x1, int y1) const {
         const int a = (r == y0) ? std::clamp(x0, 0, cols_ - 1) : 0;
         const int b = (r == y1) ? std::clamp(x1, 0, cols_ - 1) : cols_ - 1;
         QString line;
-        for (int c = a; c <= b; ++c) line.append(scr[r * cols_ + c].ch);
+        for (int c = a; c <= b; ++c) line.append(QString::fromUcs4(&scr[r * cols_ + c].ch, 1));
         out.append(rstrip(line));
     }
     return out.join(QLatin1Char('\n'));
@@ -702,7 +702,7 @@ void VtParser::appendHistory(const QString& text) {
     for (const QString& l : lines) {
         QVector<Cell> row(cols_);
         for (int c = 0; c < cols_ && c < l.size(); ++c) {
-            if (l[c].isPrint()) row[c].ch = l[c];
+            if (l[c].isPrint()) row[c].ch = char32_t(l[c].unicode());
         }
         sb_.append(row);
         if (sb_.size() > kMaxScrollback) sb_.removeFirst();
@@ -714,13 +714,13 @@ QString VtParser::dumpText() const {
     QStringList out;
     for (const QVector<Cell>& row : sb_) {
         QString line;
-        for (const Cell& c : row) line.append(c.ch);
+        for (const Cell& c : row) line.append(QString::fromUcs4(&c.ch, 1));
         out.append(rstrip(line));
     }
     const QVector<Cell>& scr = pri_;  // history is the primary screen's, never the alt's
     for (int r = 0; r < rows_; ++r) {
         QString line;
-        for (int c = 0; c < cols_; ++c) line.append(scr[r * cols_ + c].ch);
+        for (int c = 0; c < cols_; ++c) line.append(QString::fromUcs4(&scr[r * cols_ + c].ch, 1));
         out.append(rstrip(line));
     }
     while (!out.isEmpty() && out.last().isEmpty()) out.removeLast();
