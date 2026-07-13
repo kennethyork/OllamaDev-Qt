@@ -31,6 +31,7 @@
 
 #include "BoardPane.h"
 #include "Canvas.h"
+#include "PaneRegistry.h"
 #include "Config.h"
 #include "EditorPane.h"
 #include "FilesPane.h"
@@ -67,6 +68,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setWindowTitle(QStringLiteral("OllamaDev ADE — %1").arg(QFileInfo(project_).fileName()));
     resize(1440, 900);
+
+    registerExtraPanes();  // populate the registry before the Add menu is built
 
     canvas_ = new Canvas(this);
     setCentralWidget(canvas_);
@@ -174,6 +177,17 @@ void MainWindow::buildAddMenu(QMenu* menu) {
         const QString kind = k.first;
         connect(a, &QAction::triggered, this, [this, kind] { addPaneOfKind(kind); });
     }
+    // Everything registered beyond the built-ins, grouped by section.
+    QString lastGroup;
+    for (const auto& spec : PaneRegistry::instance().all()) {
+        if (spec.group != lastGroup) {
+            menu->addSeparator();
+            lastGroup = spec.group;
+        }
+        const QString kind = spec.kind;
+        connect(menu->addAction(spec.title), &QAction::triggered, this,
+                [this, kind] { addPaneOfKind(kind); });
+    }
     menu->addSeparator();
     QAction* center = menu->addAction(tr("Center canvas"));
     connect(center, &QAction::triggered, canvas_, &Canvas::centerAll);
@@ -220,6 +234,18 @@ void MainWindow::addPaneOfKind(const QString& kind) {
     else if (kind == "editor") ensureEditor();
     else if (kind == "files") ensureFiles();
     else if (kind == "settings") ensureSettings();
+    else if (const PaneSpec* spec = PaneRegistry::instance().find(kind)) {
+        // A registered pane. Singletons re-raise; the rest stack up.
+        const QString id = spec->singleton ? viewPaneId(kind)
+                                            : QStringLiteral("%1_%2").arg(kind).arg(++termSeq_);
+        if (spec->singleton) {
+            if (Pane* p = canvas_->pane(id)) {
+                canvas_->raisePane(p);
+                return;
+            }
+        }
+        if (QWidget* w = spec->factory(*this)) canvas_->addPane(id, spec->title, w, QRectF());
+    }
 }
 
 // ---- panes -----------------------------------------------------------------
@@ -345,6 +371,32 @@ void MainWindow::onThemeChanged(const QString& name) {
 }
 
 void MainWindow::status(const QString& msg) { statusBar()->showMessage(msg, 6000); }
+
+// ---- PaneHost --------------------------------------------------------------
+
+QString MainWindow::currentModel() const {
+    return models_ ? models_->currentText() : QString();
+}
+
+QString MainWindow::currentBackend() const {
+    // The desktop drives Ollama; per-role backends are a crew-launch concern.
+    return QStringLiteral("ollama");
+}
+
+void MainWindow::openFile(const QString& path) {
+    ensureEditor();
+    if (editor_) editor_->openFile(path);
+    if (Pane* p = canvas_->pane(viewPaneId("editor"))) canvas_->raisePane(p);
+}
+
+void MainWindow::runInTerminal(const QString& command) {
+    Pane* p = addTerminal(QStringLiteral("term_%1").arg(++termSeq_), project_, QString(), QRectF());
+    if (!p) return;
+    if (auto* t = p->content()->findChild<TerminalWidget*>())
+        t->sendText(command + QLatin1Char('\n'));
+    else if (auto* t2 = qobject_cast<TerminalWidget*>(p->content()))
+        t2->sendText(command + QLatin1Char('\n'));
+}
 
 // ---- Ollama presence -------------------------------------------------------
 

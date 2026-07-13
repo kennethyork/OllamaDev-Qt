@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QString>
 
+#include "PaneHost.h"
+
 class QComboBox;
 class QLabel;
 class QNetworkAccessManager;
@@ -16,12 +18,21 @@ class EditorPane;
 class FilesPane;
 class Pane;
 
-class MainWindow : public QMainWindow {
+class MainWindow : public QMainWindow, public PaneHost {
     Q_OBJECT
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // PaneHost — the surface registered panes reach the app through.
+    QString project() const override { return project_; }
+    QString currentModel() const override;
+    QString currentBackend() const override;
+    void setStatus(const QString& msg) override { status(msg); }
+    void openFile(const QString& path) override;
+    void runInTerminal(const QString& command) override;
+    QWidget* window() override { return this; }
 
 protected:
     // Never exits on the first click: asks, then saves, then closes. The PHP app
