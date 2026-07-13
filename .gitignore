@@ -1,3 +1,11 @@
+# Build trees. `.build/` is the one the AppImage script uses — without it, a
+# CMakeCache.txt full of THIS machine's absolute paths gets committed, and CI
+# then refuses to reuse a cache generated for a directory that does not exist.
 build/
+build-*/
+.build/
+dist/
 compile_commands.json
+
+# Per-project agent state (sessions, crew runs, the semantic index)
 .ollamadev/

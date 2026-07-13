@@ -1,4 +1,0 @@
-odv-tests_autogen/timestamp: \
-	/home/kennethhy/Documents/ollamadev-qt/tests/CMakeLists.txt \
-	/home/kennethhy/Documents/ollamadev-qt/tests/smoke.cpp \
-	/usr/bin/cmake

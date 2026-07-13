@@ -1,6 +1,0 @@
-ollamadev_autogen/timestamp: \
-	/home/kennethhy/Documents/ollamadev-qt/cli/CMakeLists.txt \
-	/home/kennethhy/Documents/ollamadev-qt/cli/Repl.cpp \
-	/home/kennethhy/Documents/ollamadev-qt/cli/Repl.h \
-	/home/kennethhy/Documents/ollamadev-qt/cli/main.cpp \
-	/usr/bin/cmake
