@@ -26,3 +26,20 @@ qt_add_executable(ollamadev-ade
 )
 target_link_libraries(ollamadev-ade PRIVATE odv-core Qt6::Core Qt6::Network Qt6::Widgets)
 set_target_properties(ollamadev-ade PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)
+
+# A real browser pane (QWebEngineView) when QtWebEngine is available; the Browser
+# pane falls back to the QTextBrowser reader otherwise, so a machine without the
+# (large, Chromium-based) WebEngine module still builds and runs. On by default;
+# turn off with -DODV_WEBENGINE=OFF for a lean build.
+option(ODV_WEBENGINE "Use QtWebEngine for the Browser pane" ON)
+if(ODV_WEBENGINE)
+    find_package(Qt6 COMPONENTS WebEngineWidgets QUIET)
+    if(Qt6WebEngineWidgets_FOUND)
+        target_link_libraries(ollamadev-ade PRIVATE Qt6::WebEngineWidgets)
+        target_compile_definitions(ollamadev-ade PRIVATE ODV_HAS_WEBENGINE=1)
+        message(STATUS "Browser pane: QtWebEngine (full browser)")
+    else()
+        message(STATUS "Browser pane: QTextBrowser reader (QtWebEngine not found — "
+                       "install qt6-webengine-dev for the full browser)")
+    endif()
+endif()
