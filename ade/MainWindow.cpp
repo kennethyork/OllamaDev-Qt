@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>

@@ -1,5 +1,6 @@
 #include "BoardPane.h"
 
+#include <QAbstractButton>
 #include <QCryptographicHash>
 #include <QFrame>
 #include <QHBoxLayout>

@@ -1,11 +1,13 @@
 #include "EditorPane.h"
 
+#include <QAbstractButton>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPushButton>
 #include <QShortcut>
 #include <QTabWidget>
 #include <QTextBlock>

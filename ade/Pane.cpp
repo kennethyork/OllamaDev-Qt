@@ -1,5 +1,6 @@
 #include "Pane.h"
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QGraphicsProxyWidget>
 #include <QGraphicsScene>
@@ -10,6 +11,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPushButton>
 #include <QTimer>
 #include <QWidget>
 

@@ -149,10 +149,12 @@ void VtParser::clampCursor() {
 }
 
 void VtParser::clear() {
+    // Reset the pen FIRST: erasing keeps the current background (BCE), so clearing
+    // while a themed prompt has left a background set would fill the screen with it.
+    pen_ = Cell();
     for (int r = 0; r < rows_; ++r) blankRow(r);
     sb_.clear();
     cx_ = cy_ = 0;
-    pen_ = Cell();
     markAll();
 }
 

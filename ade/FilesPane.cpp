@@ -1,5 +1,6 @@
 #include "FilesPane.h"
 
+#include <QAbstractButton>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -9,6 +10,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QTreeView>
 #include <QVBoxLayout>
 
