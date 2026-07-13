@@ -14,6 +14,7 @@
 #include "Board.h"
 #include "CodeIndex.h"
 #include "Config.h"
+#include "ContextTuner.h"
 #include "Crew.h"
 #include "Eval.h"
 #include "GitFlow.h"
@@ -23,13 +24,16 @@
 #include "Mcp.h"
 #include "Memory.h"
 #include "Models.h"
+#include "Onboard.h"
 #include "Parallel.h"
+#include "Puller.h"
 #include "Repl.h"
 #include "SecScan.h"
 #include "Skills.h"
 #include "Stt.h"
 #include "Terminals.h"
 #include "Tools.h"
+#include "Usage.h"
 #include "Verify.h"
 #include "Version.h"
 #include "Watch.h"
@@ -1780,6 +1784,44 @@ int main(int argc, char** argv) {
 
     if (cmd == "backends") return cmdBackends();
     if (cmd == "doctor") return cmdDoctor();
+
+    if (cmd == "pull") {
+        const QString model = positionals(args).value(1);
+        if (model.isEmpty()) {
+            err() << "usage: ollamadev pull <model>\n";
+            err().flush();
+            return 2;
+        }
+        QString e;
+        const bool ok = Puller::pull(model, {}, &e);
+        if (!ok && !e.isEmpty()) {
+            err() << "✗ " << e << "\n";
+            err().flush();
+        }
+        return ok ? 0 : 1;
+    }
+
+    if (cmd == "setup") {
+        // The onboarding asks before pulling a model, so it needs a real y/N.
+        return Onboard::run([](const QString& q) -> bool {
+            out() << q << " [Y/n] ";
+            out().flush();
+            QString line = QTextStream(stdin).readLine().trimmed().toLower();
+            return line.isEmpty() || line == "y" || line == "yes";
+        });
+    }
+
+    if (cmd == "context") {
+        out() << ContextTuner::report();
+        out().flush();
+        return 0;
+    }
+
+    if (cmd == "stats") {
+        out() << Usage::report();
+        out().flush();
+        return 0;
+    }
     if (cmd == "board") return cmdBoard(rest);
     if (cmd == "scan") return cmdScan(rest);
     if (cmd == "voice") return cmdVoice(rest);

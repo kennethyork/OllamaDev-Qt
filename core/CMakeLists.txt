@@ -29,6 +29,13 @@ add_library(odv-core STATIC
     Hooks.cpp Hooks.h
     GitFlow.cpp GitFlow.h
     Verify.cpp Verify.h
+    Puller.cpp Puller.h
+    Onboard.cpp Onboard.h
+    Vision.cpp Vision.h
+    SubAgent.cpp SubAgent.h
+    AgentDefs.cpp AgentDefs.h
+    Usage.cpp Usage.h
+    ContextTuner.cpp ContextTuner.h
 )
 
 target_include_directories(odv-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
