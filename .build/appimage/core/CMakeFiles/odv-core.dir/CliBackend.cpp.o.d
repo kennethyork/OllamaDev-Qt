@@ -406,6 +406,7 @@ core/CMakeFiles/odv-core.dir/CliBackend.cpp.o: \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QTemporaryDir \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qtemporarydir.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qdir.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Tools.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Config.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QJsonValue \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qjsonvalue.h \

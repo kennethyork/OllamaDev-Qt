@@ -66,11 +66,11 @@ include tests/CMakeFiles/odv-tests_autogen_timestamp_deps.dir/compiler_depend.ma
 # Include the progress variables for this target.
 include tests/CMakeFiles/odv-tests_autogen_timestamp_deps.dir/progress.make
 
-tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
-tests/CMakeFiles/odv-tests_autogen_timestamp_deps: core/libodv-core.a
 tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.4.2
-tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
 tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/qt6/libexec/uic
+tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
+tests/CMakeFiles/odv-tests_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
+tests/CMakeFiles/odv-tests_autogen_timestamp_deps: core/libodv-core.a
 
 odv-tests_autogen_timestamp_deps: tests/CMakeFiles/odv-tests_autogen_timestamp_deps
 odv-tests_autogen_timestamp_deps: tests/CMakeFiles/odv-tests_autogen_timestamp_deps.dir/build.make

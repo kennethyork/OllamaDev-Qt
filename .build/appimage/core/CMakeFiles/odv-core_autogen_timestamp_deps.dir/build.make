@@ -66,11 +66,11 @@ include core/CMakeFiles/odv-core_autogen_timestamp_deps.dir/compiler_depend.make
 # Include the progress variables for this target.
 include core/CMakeFiles/odv-core_autogen_timestamp_deps.dir/progress.make
 
-core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
-core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.4.2
-core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
 core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Concurrent.so.6.4.2
+core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.4.2
 core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/qt6/libexec/uic
+core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
+core/CMakeFiles/odv-core_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
 
 odv-core_autogen_timestamp_deps: core/CMakeFiles/odv-core_autogen_timestamp_deps
 odv-core_autogen_timestamp_deps: core/CMakeFiles/odv-core_autogen_timestamp_deps.dir/build.make

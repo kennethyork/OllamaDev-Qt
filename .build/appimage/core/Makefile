@@ -401,6 +401,78 @@ Crew.cpp.s:
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Crew.cpp.s
 .PHONY : Crew.cpp.s
 
+Eval.o: Eval.cpp.o
+.PHONY : Eval.o
+
+# target to build an object file
+Eval.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Eval.cpp.o
+.PHONY : Eval.cpp.o
+
+Eval.i: Eval.cpp.i
+.PHONY : Eval.i
+
+# target to preprocess a source file
+Eval.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Eval.cpp.i
+.PHONY : Eval.cpp.i
+
+Eval.s: Eval.cpp.s
+.PHONY : Eval.s
+
+# target to generate assembly for a file
+Eval.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Eval.cpp.s
+.PHONY : Eval.cpp.s
+
+GitFlow.o: GitFlow.cpp.o
+.PHONY : GitFlow.o
+
+# target to build an object file
+GitFlow.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/GitFlow.cpp.o
+.PHONY : GitFlow.cpp.o
+
+GitFlow.i: GitFlow.cpp.i
+.PHONY : GitFlow.i
+
+# target to preprocess a source file
+GitFlow.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/GitFlow.cpp.i
+.PHONY : GitFlow.cpp.i
+
+GitFlow.s: GitFlow.cpp.s
+.PHONY : GitFlow.s
+
+# target to generate assembly for a file
+GitFlow.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/GitFlow.cpp.s
+.PHONY : GitFlow.cpp.s
+
+Hooks.o: Hooks.cpp.o
+.PHONY : Hooks.o
+
+# target to build an object file
+Hooks.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Hooks.cpp.o
+.PHONY : Hooks.cpp.o
+
+Hooks.i: Hooks.cpp.i
+.PHONY : Hooks.i
+
+# target to preprocess a source file
+Hooks.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Hooks.cpp.i
+.PHONY : Hooks.cpp.i
+
+Hooks.s: Hooks.cpp.s
+.PHONY : Hooks.s
+
+# target to generate assembly for a file
+Hooks.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Hooks.cpp.s
+.PHONY : Hooks.cpp.s
+
 Json.o: Json.cpp.o
 .PHONY : Json.o
 
@@ -424,6 +496,30 @@ Json.s: Json.cpp.s
 Json.cpp.s:
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Json.cpp.s
 .PHONY : Json.cpp.s
+
+Lsp.o: Lsp.cpp.o
+.PHONY : Lsp.o
+
+# target to build an object file
+Lsp.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Lsp.cpp.o
+.PHONY : Lsp.cpp.o
+
+Lsp.i: Lsp.cpp.i
+.PHONY : Lsp.i
+
+# target to preprocess a source file
+Lsp.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Lsp.cpp.i
+.PHONY : Lsp.cpp.i
+
+Lsp.s: Lsp.cpp.s
+.PHONY : Lsp.s
+
+# target to generate assembly for a file
+Lsp.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Lsp.cpp.s
+.PHONY : Lsp.cpp.s
 
 Mcp.o: Mcp.cpp.o
 .PHONY : Mcp.o
@@ -689,6 +785,30 @@ Stt.cpp.s:
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Stt.cpp.s
 .PHONY : Stt.cpp.s
 
+Terminals.o: Terminals.cpp.o
+.PHONY : Terminals.o
+
+# target to build an object file
+Terminals.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Terminals.cpp.o
+.PHONY : Terminals.cpp.o
+
+Terminals.i: Terminals.cpp.i
+.PHONY : Terminals.i
+
+# target to preprocess a source file
+Terminals.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Terminals.cpp.i
+.PHONY : Terminals.cpp.i
+
+Terminals.s: Terminals.cpp.s
+.PHONY : Terminals.s
+
+# target to generate assembly for a file
+Terminals.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Terminals.cpp.s
+.PHONY : Terminals.cpp.s
+
 Tools.o: Tools.cpp.o
 .PHONY : Tools.o
 
@@ -736,6 +856,54 @@ Tui.s: Tui.cpp.s
 Tui.cpp.s:
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Tui.cpp.s
 .PHONY : Tui.cpp.s
+
+Verify.o: Verify.cpp.o
+.PHONY : Verify.o
+
+# target to build an object file
+Verify.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Verify.cpp.o
+.PHONY : Verify.cpp.o
+
+Verify.i: Verify.cpp.i
+.PHONY : Verify.i
+
+# target to preprocess a source file
+Verify.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Verify.cpp.i
+.PHONY : Verify.cpp.i
+
+Verify.s: Verify.cpp.s
+.PHONY : Verify.s
+
+# target to generate assembly for a file
+Verify.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Verify.cpp.s
+.PHONY : Verify.cpp.s
+
+Watch.o: Watch.cpp.o
+.PHONY : Watch.o
+
+# target to build an object file
+Watch.cpp.o:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Watch.cpp.o
+.PHONY : Watch.cpp.o
+
+Watch.i: Watch.cpp.i
+.PHONY : Watch.i
+
+# target to preprocess a source file
+Watch.cpp.i:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Watch.cpp.i
+.PHONY : Watch.cpp.i
+
+Watch.s: Watch.cpp.s
+.PHONY : Watch.s
+
+# target to generate assembly for a file
+Watch.cpp.s:
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage && $(MAKE) $(MAKESILENT) -f core/CMakeFiles/odv-core.dir/build.make core/CMakeFiles/odv-core.dir/Watch.cpp.s
+.PHONY : Watch.cpp.s
 
 WebSearch.o: WebSearch.cpp.o
 .PHONY : WebSearch.o
@@ -824,9 +992,21 @@ help:
 	@echo "... Crew.o"
 	@echo "... Crew.i"
 	@echo "... Crew.s"
+	@echo "... Eval.o"
+	@echo "... Eval.i"
+	@echo "... Eval.s"
+	@echo "... GitFlow.o"
+	@echo "... GitFlow.i"
+	@echo "... GitFlow.s"
+	@echo "... Hooks.o"
+	@echo "... Hooks.i"
+	@echo "... Hooks.s"
 	@echo "... Json.o"
 	@echo "... Json.i"
 	@echo "... Json.s"
+	@echo "... Lsp.o"
+	@echo "... Lsp.i"
+	@echo "... Lsp.s"
 	@echo "... Mcp.o"
 	@echo "... Mcp.i"
 	@echo "... Mcp.s"
@@ -860,12 +1040,21 @@ help:
 	@echo "... Stt.o"
 	@echo "... Stt.i"
 	@echo "... Stt.s"
+	@echo "... Terminals.o"
+	@echo "... Terminals.i"
+	@echo "... Terminals.s"
 	@echo "... Tools.o"
 	@echo "... Tools.i"
 	@echo "... Tools.s"
 	@echo "... Tui.o"
 	@echo "... Tui.i"
 	@echo "... Tui.s"
+	@echo "... Verify.o"
+	@echo "... Verify.i"
+	@echo "... Verify.s"
+	@echo "... Watch.o"
+	@echo "... Watch.i"
+	@echo "... Watch.s"
 	@echo "... WebSearch.o"
 	@echo "... WebSearch.i"
 	@echo "... WebSearch.s"

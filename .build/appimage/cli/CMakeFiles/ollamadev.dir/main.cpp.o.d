@@ -388,6 +388,10 @@ cli/CMakeFiles/ollamadev.dir/main.cpp.o: \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/quuid.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QJsonDocument \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qjsondocument.h \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/QJsonObject \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/qjsonobject.h \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/QProcess \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/qprocess.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QTextStream \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qtextstream.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Agent.h \
@@ -396,8 +400,6 @@ cli/CMakeFiles/ollamadev.dir/main.cpp.o: \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QVector \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qvector.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Backend.h \
- /usr/include/x86_64-linux-gnu/qt6/QtCore/QJsonObject \
- /usr/include/x86_64-linux-gnu/qt6/QtCore/qjsonobject.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QStringList \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qstringlist.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Board.h \
@@ -409,9 +411,16 @@ cli/CMakeFiles/ollamadev.dir/main.cpp.o: \
  /home/kennethhy/Documents/ollamadev-qt/core/Sandbox.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QHash \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qhash.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Eval.h \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/QMap \
+ /usr/include/x86_64-linux-gnu/qt6/QtCore/qmap.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/GitFlow.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/SecScan.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Hooks.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Json.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QByteArray \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qbytearray.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Lsp.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Mcp.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Tools.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Memory.h \
@@ -426,10 +435,12 @@ cli/CMakeFiles/ollamadev.dir/main.cpp.o: \
  /home/kennethhy/Documents/ollamadev-qt/cli/Repl.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Session.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Tui.h \
- /home/kennethhy/Documents/ollamadev-qt/core/SecScan.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Skills.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Stt.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QObject \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qobject.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Terminals.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Verify.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Version.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Watch.h \
  /home/kennethhy/Documents/ollamadev-qt/core/WebSearch.h

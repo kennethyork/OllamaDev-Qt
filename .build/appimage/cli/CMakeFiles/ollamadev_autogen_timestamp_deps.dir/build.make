@@ -66,10 +66,10 @@ include cli/CMakeFiles/ollamadev_autogen_timestamp_deps.dir/compiler_depend.make
 # Include the progress variables for this target.
 include cli/CMakeFiles/ollamadev_autogen_timestamp_deps.dir/progress.make
 
-cli/CMakeFiles/ollamadev_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
-cli/CMakeFiles/ollamadev_autogen_timestamp_deps: core/libodv-core.a
-cli/CMakeFiles/ollamadev_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
 cli/CMakeFiles/ollamadev_autogen_timestamp_deps: /usr/lib/qt6/libexec/uic
+cli/CMakeFiles/ollamadev_autogen_timestamp_deps: /usr/lib/qt6/libexec/moc
+cli/CMakeFiles/ollamadev_autogen_timestamp_deps: /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.4.2
+cli/CMakeFiles/ollamadev_autogen_timestamp_deps: core/libodv-core.a
 
 ollamadev_autogen_timestamp_deps: cli/CMakeFiles/ollamadev_autogen_timestamp_deps
 ollamadev_autogen_timestamp_deps: cli/CMakeFiles/ollamadev_autogen_timestamp_deps.dir/build.make

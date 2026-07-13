@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -97,3 +98,43 @@ jobs:
         with:
           name: OllamaDev-x86_64.AppImage
           path: dist/OllamaDev-x86_64.AppImage
+
+  release:
+    # Only on a tag, and only once everything above is green — a release artifact
+    # that never passed the suite is worse than no release artifact.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, cli-only, appimage]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake qt6-base-dev qt6-base-dev-tools \
+            libgl1-mesa-dev libxkbcommon-x11-0 xvfb file desktop-file-utils
+
+      - name: Build artifacts
+        run: |
+          scripts/build-appimage.sh
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+          (cd build && cpack -G "TGZ;DEB")
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Built on ubuntu-22.04 so the glibc floor is 2.35. Building this on
+          # ubuntu-latest would silently raise the floor and the AppImage would
+          # refuse to start on Mint 21 — with no warning until a user reports it.
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "OllamaDev-Qt ${GITHUB_REF_NAME}" \
+            --prerelease \
+            --notes-file RELEASE_NOTES.md \
+            dist/OllamaDev-x86_64.AppImage \
+            build/ollamadev-*.tar.gz \
+            build/ollamadev-*.deb

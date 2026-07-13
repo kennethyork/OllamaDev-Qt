@@ -391,6 +391,104 @@ core/CMakeFiles/odv-core.dir/Tui.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Tui.cpp.s"
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Tui.cpp -o CMakeFiles/odv-core.dir/Tui.cpp.s
 
+core/CMakeFiles/odv-core.dir/Lsp.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Lsp.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Lsp.cpp
+core/CMakeFiles/odv-core.dir/Lsp.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building CXX object core/CMakeFiles/odv-core.dir/Lsp.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Lsp.cpp.o -MF CMakeFiles/odv-core.dir/Lsp.cpp.o.d -o CMakeFiles/odv-core.dir/Lsp.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Lsp.cpp
+
+core/CMakeFiles/odv-core.dir/Lsp.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Lsp.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Lsp.cpp > CMakeFiles/odv-core.dir/Lsp.cpp.i
+
+core/CMakeFiles/odv-core.dir/Lsp.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Lsp.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Lsp.cpp -o CMakeFiles/odv-core.dir/Lsp.cpp.s
+
+core/CMakeFiles/odv-core.dir/Eval.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Eval.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Eval.cpp
+core/CMakeFiles/odv-core.dir/Eval.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building CXX object core/CMakeFiles/odv-core.dir/Eval.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Eval.cpp.o -MF CMakeFiles/odv-core.dir/Eval.cpp.o.d -o CMakeFiles/odv-core.dir/Eval.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Eval.cpp
+
+core/CMakeFiles/odv-core.dir/Eval.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Eval.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Eval.cpp > CMakeFiles/odv-core.dir/Eval.cpp.i
+
+core/CMakeFiles/odv-core.dir/Eval.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Eval.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Eval.cpp -o CMakeFiles/odv-core.dir/Eval.cpp.s
+
+core/CMakeFiles/odv-core.dir/Watch.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Watch.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Watch.cpp
+core/CMakeFiles/odv-core.dir/Watch.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_26) "Building CXX object core/CMakeFiles/odv-core.dir/Watch.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Watch.cpp.o -MF CMakeFiles/odv-core.dir/Watch.cpp.o.d -o CMakeFiles/odv-core.dir/Watch.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Watch.cpp
+
+core/CMakeFiles/odv-core.dir/Watch.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Watch.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Watch.cpp > CMakeFiles/odv-core.dir/Watch.cpp.i
+
+core/CMakeFiles/odv-core.dir/Watch.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Watch.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Watch.cpp -o CMakeFiles/odv-core.dir/Watch.cpp.s
+
+core/CMakeFiles/odv-core.dir/Terminals.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Terminals.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Terminals.cpp
+core/CMakeFiles/odv-core.dir/Terminals.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_27) "Building CXX object core/CMakeFiles/odv-core.dir/Terminals.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Terminals.cpp.o -MF CMakeFiles/odv-core.dir/Terminals.cpp.o.d -o CMakeFiles/odv-core.dir/Terminals.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Terminals.cpp
+
+core/CMakeFiles/odv-core.dir/Terminals.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Terminals.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Terminals.cpp > CMakeFiles/odv-core.dir/Terminals.cpp.i
+
+core/CMakeFiles/odv-core.dir/Terminals.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Terminals.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Terminals.cpp -o CMakeFiles/odv-core.dir/Terminals.cpp.s
+
+core/CMakeFiles/odv-core.dir/Hooks.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Hooks.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Hooks.cpp
+core/CMakeFiles/odv-core.dir/Hooks.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_28) "Building CXX object core/CMakeFiles/odv-core.dir/Hooks.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Hooks.cpp.o -MF CMakeFiles/odv-core.dir/Hooks.cpp.o.d -o CMakeFiles/odv-core.dir/Hooks.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Hooks.cpp
+
+core/CMakeFiles/odv-core.dir/Hooks.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Hooks.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Hooks.cpp > CMakeFiles/odv-core.dir/Hooks.cpp.i
+
+core/CMakeFiles/odv-core.dir/Hooks.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Hooks.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Hooks.cpp -o CMakeFiles/odv-core.dir/Hooks.cpp.s
+
+core/CMakeFiles/odv-core.dir/GitFlow.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/GitFlow.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/GitFlow.cpp
+core/CMakeFiles/odv-core.dir/GitFlow.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_29) "Building CXX object core/CMakeFiles/odv-core.dir/GitFlow.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/GitFlow.cpp.o -MF CMakeFiles/odv-core.dir/GitFlow.cpp.o.d -o CMakeFiles/odv-core.dir/GitFlow.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/GitFlow.cpp
+
+core/CMakeFiles/odv-core.dir/GitFlow.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/GitFlow.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/GitFlow.cpp > CMakeFiles/odv-core.dir/GitFlow.cpp.i
+
+core/CMakeFiles/odv-core.dir/GitFlow.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/GitFlow.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/GitFlow.cpp -o CMakeFiles/odv-core.dir/GitFlow.cpp.s
+
+core/CMakeFiles/odv-core.dir/Verify.cpp.o: core/CMakeFiles/odv-core.dir/flags.make
+core/CMakeFiles/odv-core.dir/Verify.cpp.o: /home/kennethhy/Documents/ollamadev-qt/core/Verify.cpp
+core/CMakeFiles/odv-core.dir/Verify.cpp.o: core/CMakeFiles/odv-core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_30) "Building CXX object core/CMakeFiles/odv-core.dir/Verify.cpp.o"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT core/CMakeFiles/odv-core.dir/Verify.cpp.o -MF CMakeFiles/odv-core.dir/Verify.cpp.o.d -o CMakeFiles/odv-core.dir/Verify.cpp.o -c /home/kennethhy/Documents/ollamadev-qt/core/Verify.cpp
+
+core/CMakeFiles/odv-core.dir/Verify.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/odv-core.dir/Verify.cpp.i"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kennethhy/Documents/ollamadev-qt/core/Verify.cpp > CMakeFiles/odv-core.dir/Verify.cpp.i
+
+core/CMakeFiles/odv-core.dir/Verify.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/odv-core.dir/Verify.cpp.s"
+	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kennethhy/Documents/ollamadev-qt/core/Verify.cpp -o CMakeFiles/odv-core.dir/Verify.cpp.s
+
 # Object files for target odv-core
 odv__core_OBJECTS = \
 "CMakeFiles/odv-core.dir/odv-core_autogen/mocs_compilation.cpp.o" \
@@ -415,7 +513,14 @@ odv__core_OBJECTS = \
 "CMakeFiles/odv-core.dir/CodeIndex.cpp.o" \
 "CMakeFiles/odv-core.dir/WebSearch.cpp.o" \
 "CMakeFiles/odv-core.dir/Stt.cpp.o" \
-"CMakeFiles/odv-core.dir/Tui.cpp.o"
+"CMakeFiles/odv-core.dir/Tui.cpp.o" \
+"CMakeFiles/odv-core.dir/Lsp.cpp.o" \
+"CMakeFiles/odv-core.dir/Eval.cpp.o" \
+"CMakeFiles/odv-core.dir/Watch.cpp.o" \
+"CMakeFiles/odv-core.dir/Terminals.cpp.o" \
+"CMakeFiles/odv-core.dir/Hooks.cpp.o" \
+"CMakeFiles/odv-core.dir/GitFlow.cpp.o" \
+"CMakeFiles/odv-core.dir/Verify.cpp.o"
 
 # External object files for target odv-core
 odv__core_EXTERNAL_OBJECTS =
@@ -443,9 +548,16 @@ core/libodv-core.a: core/CMakeFiles/odv-core.dir/CodeIndex.cpp.o
 core/libodv-core.a: core/CMakeFiles/odv-core.dir/WebSearch.cpp.o
 core/libodv-core.a: core/CMakeFiles/odv-core.dir/Stt.cpp.o
 core/libodv-core.a: core/CMakeFiles/odv-core.dir/Tui.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Lsp.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Eval.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Watch.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Terminals.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Hooks.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/GitFlow.cpp.o
+core/libodv-core.a: core/CMakeFiles/odv-core.dir/Verify.cpp.o
 core/libodv-core.a: core/CMakeFiles/odv-core.dir/build.make
 core/libodv-core.a: core/CMakeFiles/odv-core.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Linking CXX static library libodv-core.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kennethhy/Documents/ollamadev-qt/.build/appimage/CMakeFiles --progress-num=$(CMAKE_PROGRESS_31) "Linking CXX static library libodv-core.a"
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && $(CMAKE_COMMAND) -P CMakeFiles/odv-core.dir/cmake_clean_target.cmake
 	cd /home/kennethhy/Documents/ollamadev-qt/.build/appimage/core && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/odv-core.dir/link.txt --verbose=$(VERBOSE)
 

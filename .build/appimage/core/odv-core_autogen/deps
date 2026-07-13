@@ -15,8 +15,16 @@ odv-core_autogen/timestamp: \
 	/home/kennethhy/Documents/ollamadev-qt/core/Config.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Crew.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Crew.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Eval.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Eval.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/GitFlow.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/GitFlow.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Hooks.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Hooks.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Json.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Json.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Lsp.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Lsp.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Mcp.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Mcp.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Memory.cpp \
@@ -39,11 +47,17 @@ odv-core_autogen/timestamp: \
 	/home/kennethhy/Documents/ollamadev-qt/core/Skills.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Stt.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Stt.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Terminals.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Terminals.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Tools.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Tools.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Tui.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/Tui.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Verify.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Verify.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/Version.h \
+	/home/kennethhy/Documents/ollamadev-qt/core/Watch.cpp \
+	/home/kennethhy/Documents/ollamadev-qt/core/Watch.h \
 	/home/kennethhy/Documents/ollamadev-qt/core/WebSearch.cpp \
 	/home/kennethhy/Documents/ollamadev-qt/core/WebSearch.h \
 	/usr/include/asm-generic/errno-base.h \

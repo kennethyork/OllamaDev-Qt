@@ -15,9 +15,11 @@
 #include "CodeIndex.h"
 #include "Config.h"
 #include "Crew.h"
+#include "Eval.h"
 #include "GitFlow.h"
 #include "Hooks.h"
 #include "Json.h"
+#include "Lsp.h"
 #include "Mcp.h"
 #include "Memory.h"
 #include "Models.h"
@@ -147,7 +149,13 @@ void printHelp() {
           << "  ollamadev voice              record the mic and transcribe it (100% local)\n"
           << "                               --setup fetch the engine · --model <size> ·\n"
           << "                               --history [n] · --clear\n"
-          << "  ollamadev transcribe <file>  transcribe an audio file\n\n"
+          << "  ollamadev transcribe <file>  transcribe an audio file\n"
+          << "  ollamadev lsp [--port N]     language server — AI completion, hover, go-to-def\n"
+          << "                               and real diagnostics (php -l, py_compile, go vet,\n"
+          << "                               gcc, rustc). stdio by default; --port for TCP\n"
+          << "  ollamadev eval               fixed task suite → a pass rate you can compare\n"
+          << "                               --only <task> · --compare a,b,c · --json ·\n"
+          << "                               --min N (exit 1 below N%) · --keep\n\n"
           << "Options:\n"
           << "  --backend <id>               ollama | claude | codex | gemini | cursor-agent |\n"
           << "                               opencode | qwen | aider | goose | amp | crush | droid\n"
@@ -1569,6 +1577,145 @@ int cmdCommands(const QStringList& args) {
     return 0;
 }
 
+// ------------------------------------------------------------------- lsp / eval
+
+int cmdLsp(const QStringList& args) {
+    // NOTHING may be printed on the way in: on the stdio path stdout is the LSP
+    // channel from the moment serve() takes fd 1, and a banner here would be the
+    // first thing the editor's framing parser choked on. Status goes to stderr,
+    // inside serve().
+    LspOptions o;
+    o.port = flagValue(args, "--port", "0").toInt();
+    o.backend = flagValue(args, "--backend");
+    o.model = flagValue(args, "--model", flagValue(args, "-m"));
+    return LspServer::serve(o);
+}
+
+int cmdEval(const QStringList& args) {
+    EvalOptions o;
+    o.only = flagValue(args, "--only");
+    o.backend = flagValue(args, "--backend", Config::str("model.backend", "ollama"));
+    o.model = flagValue(args, "--model", flagValue(args, "-m"));
+    o.json = hasFlag(args, "--json");
+    o.keep = hasFlag(args, "--keep");
+    o.min = flagValue(args, "--min", "-1").toDouble();
+
+    QStringList models;
+    for (const QString& m : flagValue(args, "--compare").split(',', Qt::SkipEmptyParts))
+        models << m.trimmed();
+    if (models.isEmpty()) {
+        QString m = o.model;
+        if (m.isEmpty()) {
+            auto b = Backends::get(o.backend);
+            m = b ? b->defaultModel() : QString();
+        }
+        if (m.isEmpty()) {
+            err() << "no model: pass -m <model> (or --compare a,b)\n";
+            err().flush();
+            return 2;
+        }
+        models << m;
+    }
+
+    const QVector<EvalTask> tasks = Evals::suite(o.only);
+    if (tasks.isEmpty()) {
+        err() << (o.only.isEmpty() ? QStringLiteral("the suite is empty\n")
+                                   : QStringLiteral("no eval task named '%1'\n").arg(o.only));
+        err().flush();
+        return 2;
+    }
+
+    if (!o.json) {
+        out() << "eval · " << tasks.size() << " task" << (tasks.size() == 1 ? "" : "s") << " · "
+              << models.join(", ") << "\n\n";
+        out().flush();
+    }
+
+    // Live ticks as tasks land. They finish out of order — that is the point of
+    // running them concurrently — so each line names its own task and model.
+    const auto tick = [&](const EvalResult& r) {
+        if (o.json) return;
+        const QString mark = r.skipped ? QStringLiteral("–") : (r.pass ? QStringLiteral("✓")
+                                                                       : QStringLiteral("✗"));
+        out() << QStringLiteral("  %1 %2 %3 %4s  %5\n")
+                     .arg(mark)
+                     .arg(models.size() > 1 ? r.model.left(22) : QString(), models.size() > 1 ? -23 : 0)
+                     .arg(r.name, -18)
+                     .arg(r.ms / 1000.0, 5, 'f', 1)
+                     .arg(r.pass ? QString() : r.detail);
+        out().flush();
+    };
+
+    const QVector<EvalResult> results = Evals::run(tasks, o.backend, models, o.keep, tick);
+
+    // Pass rate per model. Skipped tasks are out of the denominator: a check whose
+    // interpreter is not installed says nothing about the model.
+    QMap<QString, int> pass, ran, skipped;
+    for (const EvalResult& r : results) {
+        if (r.skipped) {
+            ++skipped[r.model];
+            continue;
+        }
+        ++ran[r.model];
+        if (r.pass) ++pass[r.model];
+    }
+
+    double worst = 100.0;
+    for (const QString& m : models) {
+        const int n = ran.value(m);
+        const double rate = n > 0 ? 100.0 * pass.value(m) / n : 0.0;
+        worst = qMin(worst, rate);
+    }
+
+    if (o.json) {
+        QJsonArray items;
+        for (const EvalResult& r : results) {
+            items.append(QJsonObject{{"model", r.model},
+                                     {"task", r.name},
+                                     {"pass", r.pass},
+                                     {"skipped", r.skipped},
+                                     {"ms", r.ms},
+                                     {"detail", r.detail}});
+        }
+        QJsonObject rates;
+        for (const QString& m : models) {
+            const int n = ran.value(m);
+            rates.insert(m, QJsonObject{{"passed", pass.value(m)},
+                                        {"ran", n},
+                                        {"skipped", skipped.value(m)},
+                                        {"rate", n > 0 ? 100.0 * pass.value(m) / n : 0.0}});
+        }
+        out() << QString::fromUtf8(json::encode(QJsonObject{
+                     {"tasks", tasks.size()}, {"models", rates}, {"results", items}}))
+              << "\n";
+        out().flush();
+    } else {
+        out() << "\n";
+        for (const QString& m : models) {
+            const int n = ran.value(m);
+            const double rate = n > 0 ? 100.0 * pass.value(m) / n : 0.0;
+            out() << QStringLiteral("  %1 %2/%3  %4%")
+                         .arg(m, -24)
+                         .arg(pass.value(m))
+                         .arg(n)
+                         .arg(rate, 5, 'f', 1);
+            if (skipped.value(m) > 0) out() << "  (" << skipped.value(m) << " skipped)";
+            out() << "\n";
+        }
+        out().flush();
+    }
+
+    // The floor is what makes this usable in CI: "this model is good enough to ship".
+    if (o.min >= 0 && worst < o.min) {
+        err() << QStringLiteral("✗ pass rate %1% is below --min %2%\n")
+                     .arg(worst, 0, 'f', 1)
+                     .arg(o.min, 0, 'f', 1);
+        err().flush();
+        return 1;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1606,6 +1753,11 @@ int main(int argc, char** argv) {
 
     const QString cmd = args.first();
     const QStringList rest = args.mid(1);
+
+    // Must be early and must not fall through anything that prints: on the stdio
+    // path `lsp` owns stdout the moment it starts.
+    if (cmd == "lsp") return cmdLsp(rest);
+    if (cmd == "eval") return cmdEval(rest);
 
     if (cmd == "mcp") return cmdMcp(rest);
     if (cmd == "skills") return cmdSkills(rest);

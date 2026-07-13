@@ -417,6 +417,7 @@ core/CMakeFiles/odv-core.dir/Tools.cpp.o: \
  /home/kennethhy/Documents/ollamadev-qt/core/Config.h \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/QJsonValue \
  /usr/include/x86_64-linux-gnu/qt6/QtCore/qjsonvalue.h \
+ /home/kennethhy/Documents/ollamadev-qt/core/Hooks.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Mcp.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Memory.h \
  /home/kennethhy/Documents/ollamadev-qt/core/Skills.h \
