@@ -173,7 +173,11 @@ static void testNoGlobalProcessNuking() {
     for (const QString& f : {QStringLiteral("ade/MainWindow.cpp"),
                              QStringLiteral("ade/TerminalWidget.cpp"),
                              QStringLiteral("ade/main.cpp"), QStringLiteral("core/Pty.cpp"),
-                             QStringLiteral("core/Stt.cpp")}) {
+                             QStringLiteral("core/Stt.cpp"),
+                             // core/Terminals.cpp is THE file the bug lived in — it is the
+                             // port of the multiplexer that ran the boot-time pkill. A guard
+                             // that covered everything except the crime scene was theatre.
+                             QStringLiteral("core/Terminals.cpp")}) {
         const QString src = readSource(f);
         if (src.isEmpty()) {
             clean = false;

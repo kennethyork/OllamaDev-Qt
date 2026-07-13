@@ -37,6 +37,10 @@ private:
     struct Slash {
         bool handled = false;  // recognised as a command
         bool quit = false;
+        // A user's own command (.ollamadev/commands/<name>.md) expands to a prompt
+        // template rather than doing something itself — so it is a TURN, not a
+        // builtin. Non-empty means "run this as the user's message".
+        QString prompt;
     };
 
     // --- input --------------------------------------------------------------

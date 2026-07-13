@@ -1,5 +1,7 @@
 #include "Repl.h"
 
+#include "Hooks.h"  // UserCmds — custom slash commands
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -1041,6 +1043,11 @@ Repl::Slash Repl::slash(const QString& input) {
                               dim(QStringLiteral(" — pure conversation, tools off.\n"))
                         : cyan(QStringLiteral("  agent mode")) +
                               dim(QStringLiteral(" — tools enabled.\n"));
+    } else if (UserCmds::exists(cmd)) {
+        // A user's own command from .ollamadev/commands/<name>.md. It expands to a
+        // prompt template, so it is a turn, not a builtin — without this the REPL
+        // says "unknown command" for a command the CLI itself happily runs.
+        s.prompt = UserCmds::expand(cmd, args);
     } else {
         s.handled = false;
     }
@@ -1110,6 +1117,10 @@ int Repl::run() {
         if (input.startsWith(QLatin1Char('/'))) {
             const Slash s = slash(input);
             if (s.quit) break;
+            if (!s.prompt.isEmpty()) {
+                runTurn(s.prompt);  // a user command expands to a prompt, so it is a turn
+                continue;
+            }
             if (!s.handled)
                 emitRaw(yellow(QStringLiteral("  unknown command: ")) + input + QLatin1Char('\n') +
                         dim(QStringLiteral("  /help lists them all\n")));
