@@ -23,6 +23,7 @@
 #include "Mcp.h"
 #include "Memory.h"
 #include "Skills.h"
+#include "SubAgent.h"
 #include "WebSearch.h"
 
 namespace odv {
@@ -1308,7 +1309,6 @@ void Tools::registerAll() {
     r.populated = true;
 
     // TODO: not yet ported from the PHP registry (src/65-tools-register.php):
-    //   task               — needs the nested subagent runner
     //   clear_board        — needs Board/Crew, and must stay refused mid-run
 
     add(r, ToolDef{QStringLiteral("view"),
@@ -1511,6 +1511,12 @@ void Tools::registerAll() {
                                   "the tail of the output."),
                    params(QJsonObject{}, {}),  // no parameters → MUST be {}: see the QUIRK in Tools.h
                    true, toolRunTests});
+
+    // ---- delegation --------------------------------------------------------
+    // task/subagent/delegate: a nested agent for focused sub-tasks. Provided by
+    // SubAgent so its runner and its schema stay in one place, added here because
+    // the registry's add() is file-local to this translation unit.
+    for (const ToolDef& d : SubAgent::tools()) add(r, d);
 
     // ---- MCP ---------------------------------------------------------------
     // Tools discovered on the servers in config `mcpServers`, registered as

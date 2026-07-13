@@ -54,6 +54,7 @@ private:
 
     Pane* addTerminal(const QString& id, const QString& cwd, const QString& replay,
                       const QRectF& geom);
+    Pane* addCliTerminal(const QString& cliId);  // a terminal that opens into a CLI's REPL
     Pane* ensureBoard(const QRectF& geom = QRectF());
     Pane* ensureEditor(const QRectF& geom = QRectF());
     Pane* ensureFiles(const QRectF& geom = QRectF());

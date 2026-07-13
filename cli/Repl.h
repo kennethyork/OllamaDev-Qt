@@ -16,6 +16,12 @@ struct ReplOptions {
     QString model;      // empty => the session's model, else the backend default
     bool resume = false;  // -c / --continue: pick up the latest session for this cwd
     QString sessionId;    // resume a specific session
+    // `ollamadev chat` is the REPL's /chat mode chosen up front: tools stay off for
+    // the whole thread, so a plain conversation never triggers a tool it can't run.
+    bool chat = false;
+    // A prompt passed on the command line (`ollamadev chat "…"`) runs as the first
+    // turn, then the loop goes interactive — a piped stdin just hits EOF and exits.
+    QString initialPrompt;
 };
 
 // The interactive chat loop: banner, boxed line editor, a streaming answer with
@@ -74,6 +80,7 @@ private:
     QString cmdRetry();
     QString cmdCd(const QString& dir);
     QString cmdLs(const QString& dir) const;
+    QString cmdOutputStyle(const QString& args);
 
     // --- misc ---------------------------------------------------------------
     void banner() const;

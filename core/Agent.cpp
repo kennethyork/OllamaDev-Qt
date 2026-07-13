@@ -10,6 +10,7 @@
 
 #include "Config.h"
 #include "Tools.h"
+#include "Usage.h"
 
 namespace odv {
 namespace {
@@ -149,6 +150,11 @@ ChatTurn Agent::turn(QVector<ChatMessage>& messages, const StreamSink& sink,
         return t;
     }
     if (!t.ok) return t;
+
+    // Meter real token usage from the /api/chat counts. Covers the REPL agent
+    // path, one-shots, and crew coders — every route that runs a native turn.
+    if (t.promptTokens > 0 || t.evalTokens > 0)
+        Usage::record(model_, t.promptTokens, t.evalTokens);
 
     ChatMessage m;
     m.role = QStringLiteral("assistant");

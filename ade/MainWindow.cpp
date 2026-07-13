@@ -29,15 +29,19 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "Backend.h"
 #include "BoardPane.h"
 #include "Canvas.h"
+#include "CommandPalette.h"
 #include "PaneRegistry.h"
 #include "Config.h"
 #include "EditorPane.h"
 #include "FilesPane.h"
+#include "ManageDialogs.h"
 #include "Pane.h"
 #include "TerminalWidget.h"
 #include "Theme.h"
+#include "ThemeDialog.h"
 #include "Tools.h"
 
 namespace odv {
@@ -92,6 +96,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     autosave_->setInterval(4000);
     connect(autosave_, &QTimer::timeout, this, &MainWindow::autosave);
     autosave_->start();
+
+    // Ctrl-K command palette. install() owns the shortcut and overlay; it reaches
+    // pane-open and theme actions through this window's slots, so no new PaneHost
+    // surface is needed.
+    CommandPalette::install(*this);
 }
 
 MainWindow::~MainWindow() = default;
@@ -148,6 +157,28 @@ void MainWindow::buildTopBar() {
     add->setMenu(menu);
     row->addWidget(add);
 
+    // Management dialogs + theme editor (ported from the PHP app's manage menu).
+    auto* manage = new QToolButton(bar);
+    manage->setText(tr("Manage ▾"));
+    manage->setPopupMode(QToolButton::InstantPopup);
+    auto* mmenu = new QMenu(manage);
+    connect(mmenu->addAction(tr("Launch Crew…")), &QAction::triggered, this,
+            [this] { ManageDialogs::openCrewLaunch(*this); });
+    connect(mmenu->addAction(tr("Review changes…")), &QAction::triggered, this,
+            [this] { ManageDialogs::openReview(*this); });
+    mmenu->addSeparator();
+    connect(mmenu->addAction(tr("Crew roles…")), &QAction::triggered, this,
+            [this] { ManageDialogs::openRoles(*this); });
+    connect(mmenu->addAction(tr("Skills…")), &QAction::triggered, this,
+            [this] { ManageDialogs::openSkills(*this); });
+    connect(mmenu->addAction(tr("Hooks…")), &QAction::triggered, this,
+            [this] { ManageDialogs::openHooks(*this); });
+    mmenu->addSeparator();
+    connect(mmenu->addAction(tr("Theme editor…")), &QAction::triggered, this,
+            [this] { ThemeDialog::open(this); });
+    manage->setMenu(mmenu);
+    row->addWidget(manage);
+
     row->addStretch(1);
 
     auto* cwd = new QLabel(project_, bar);
@@ -177,6 +208,21 @@ void MainWindow::buildAddMenu(QMenu* menu) {
         const QString kind = k.first;
         connect(a, &QAction::triggered, this, [this, kind] { addPaneOfKind(kind); });
     }
+
+    // A terminal that opens straight into a CLI. ollamadev (our own REPL) leads;
+    // then every OTHER coding CLI actually installed on this machine. The list is
+    // gated on availability the same way `ollamadev backends` is, so we never
+    // offer a terminal for a CLI that is not there.
+    QMenu* cli = menu->addMenu(tr("CLI terminal"));
+    connect(cli->addAction(tr("ollamadev — interactive")), &QAction::triggered, this,
+            [this] { addCliTerminal(QStringLiteral("ollamadev")); });
+    cli->addSeparator();
+    for (const QString& id : Backends::availableIds()) {
+        if (id == "ollama") continue;  // that is the HTTP backend, not a CLI to open
+        connect(cli->addAction(Backends::labelFor(id)), &QAction::triggered, this,
+                [this, id] { addCliTerminal(id); });
+    }
+
     // Everything registered beyond the built-ins, grouped by section.
     QString lastGroup;
     for (const auto& spec : PaneRegistry::instance().all()) {
@@ -272,6 +318,24 @@ Pane* MainWindow::addTerminal(const QString& id, const QString& cwd, const QStri
 
     const int seq = id.mid(5).toInt();
     if (seq > termSeq_) termSeq_ = seq;
+    return p;
+}
+
+// A terminal that opens straight into a CLI. `cliId` is a backend id ("ollamadev"
+// for our own REPL, or claude/codex/gemini/...). We launch it by SENDING the
+// command into the interactive shell rather than exec-ing the binary directly:
+// the shell has already sourced the user's rc files, so nvm / ~/.local/bin are on
+// PATH there even when the GUI app's own environment (launched from a desktop
+// menu) never saw them. When the CLI exits you drop back to a usable shell.
+Pane* MainWindow::addCliTerminal(const QString& cliId) {
+    Pane* p = addTerminal(QStringLiteral("term_%1").arg(++termSeq_), project_, QString(), QRectF());
+    if (!p) return nullptr;
+    auto* term = qobject_cast<TerminalWidget*>(p->content());
+    if (!term) return p;
+    term->setProperty("odvKind", cliId);
+    p->setTitle(cliId);
+    // The command is just the id — cursor-agent's binary is literally "cursor-agent".
+    term->sendText(cliId + QLatin1Char('\n'));
     return p;
 }
 

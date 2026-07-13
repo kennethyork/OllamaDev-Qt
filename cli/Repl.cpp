@@ -17,12 +17,15 @@
 #include <cstdio>
 #include <unistd.h>
 
+#include "AgentDefs.h"
 #include "Config.h"
 #include "Crew.h"
 #include "Models.h"
 #include "OllamaBackend.h"
 #include "Tools.h"
+#include "Usage.h"
 #include "Version.h"
+#include "Vision.h"
 
 namespace odv {
 namespace {
@@ -177,7 +180,8 @@ const QStringList& slashCommands() {
         QStringLiteral("/status"),  QStringLiteral("/pwd"),     QStringLiteral("/cd"),
         QStringLiteral("/ls"),      QStringLiteral("/permission"), QStringLiteral("/undo"),
         QStringLiteral("/init"),    QStringLiteral("/crew"),    QStringLiteral("/retry"),
-        QStringLiteral("/plan"),    QStringLiteral("/agent"),   QStringLiteral("/chat")};
+        QStringLiteral("/plan"),    QStringLiteral("/agent"),   QStringLiteral("/chat"),
+        QStringLiteral("/image"),   QStringLiteral("/output-style")};
     return cmds;
 }
 
@@ -217,14 +221,20 @@ Repl::Repl(ReplOptions opt) : opt_(std::move(opt)) {
 
     agent_ = std::make_unique<Agent>(backendId_, model_);
     rebuildPrompts();
+
+    chatOnly_ = opt_.chat;  // `ollamadev chat`: start tool-free, same as /chat
 }
 
 Repl::~Repl() = default;
 
 void Repl::rebuildPrompts() {
     agentPrompt_ = agent_->buildSystemPrompt(QDir::currentPath());
+    // The chosen output style tunes HOW the model writes; it applies to both the
+    // tool-using and the chat prompts.
+    const QString styleSuffix = OutputStyles::suffix(OutputStyles::current());
+    agentPrompt_ += styleSuffix;
     agent_->setSystemPrompt(agentPrompt_);
-    chatPrompt_ = QString::fromUtf8(kChatPrompt);
+    chatPrompt_ = QString::fromUtf8(kChatPrompt) + styleSuffix;
 }
 
 // Chat mode must not carry the tool instructions (they tell the model to call
@@ -578,7 +588,22 @@ void Repl::runTurn(const QString& text) {
     syncSystemMessage();
     ChatMessage user;
     user.role = QStringLiteral("user");
-    user.content = expandMentions(text);
+
+    // Vision: pull any /image or @image.png attachments out FIRST, base64 them onto
+    // the message's images[] (Ollama sends them to a vision model, and ignores them
+    // on a text one), and strip the tokens so what's left is a natural prompt. This
+    // runs before expandMentions so an image @token is never inlined as raw bytes.
+    const QStringList imgPaths = Vision::extractImagePaths(text);
+    for (const QString& p : imgPaths) {
+        const QString b64 = Vision::encodeBase64(p);
+        if (!b64.isEmpty()) user.images << b64;
+    }
+    if (!user.images.isEmpty())
+        emitRaw(dim(QStringLiteral("  🖼 attached %1 image(s)").arg(user.images.size())) +
+                QLatin1Char('\n'));
+    const QString cleaned = imgPaths.isEmpty() ? text : Vision::stripImageTokens(text);
+
+    user.content = expandMentions(cleaned);
     session_.messages().append(user);
     session_.save();
 
@@ -642,6 +667,10 @@ void Repl::runTurn(const QString& text) {
                 m.content = t.content;
                 m.thinking = t.thinking;
                 session_.messages().append(m);
+                // Agent::turn meters usage itself; this branch bypasses it, so
+                // record the chat/CLI turn's tokens here to keep `stats` complete.
+                if (t.promptTokens > 0 || t.evalTokens > 0)
+                    Usage::record(model_, t.promptTokens, t.evalTokens);
             }
         } else {
             t = agent_->turn(session_.messages(), sink, cancel);
@@ -715,12 +744,14 @@ QString Repl::cmdHelp() const {
     o += row(QStringLiteral("/models"), QStringLiteral("list installed models"));
     o += QLatin1Char('\n') + dim(QStringLiteral("  Files & edits")) + QLatin1Char('\n');
     o += row(QStringLiteral("@path/to/file"), QStringLiteral("inline a file into your message"));
+    o += row(QStringLiteral("/image <path>"), QStringLiteral("attach an image (or @pic.png) for a vision model"));
     o += row(QStringLiteral("/undo"), QStringLiteral("revert the most recent file edit"));
     o += row(QStringLiteral("/init"), QStringLiteral("generate OLLAMADEV.md project memory"));
     o += QLatin1Char('\n') + dim(QStringLiteral("  Project & context")) + QLatin1Char('\n');
     o += row(QStringLiteral("/context · /status"), QStringLiteral("context fill, model, hardware"));
     o += row(QStringLiteral("/tools"), QStringLiteral("list available tools"));
     o += row(QStringLiteral("/permission [mode]"), QStringLiteral("auto | ask | readonly | plan"));
+    o += row(QStringLiteral("/output-style"), QStringLiteral("default | concise | explanatory | formal | bullets"));
     o += row(QStringLiteral("/plan [on|off]"),
              QStringLiteral("research read-only, propose a plan, edit on approval"));
     o += row(QStringLiteral("/crew <task>"),
@@ -965,6 +996,27 @@ QString Repl::cmdLs(const QString& dir) const {
     return (r.ok ? r.output : r.error) + QLatin1Char('\n');
 }
 
+QString Repl::cmdOutputStyle(const QString& args) {
+    const QString want = args.trimmed().toLower();
+    if (!want.isEmpty()) {
+        if (!OutputStyles::set(want))
+            return yellow(QStringLiteral("  unknown style: %1\n").arg(want)) +
+                   dim(QStringLiteral("  choose one of: ") +
+                       OutputStyles::names().join(QStringLiteral(", ")) + QLatin1Char('\n'));
+        rebuildPrompts();  // the style is a system-prompt suffix
+    }
+    const QString cur = OutputStyles::current();
+    QString o = QLatin1Char('\n') + dim(QStringLiteral("  Output styles:")) + QLatin1Char('\n');
+    for (const QString& name : OutputStyles::names()) {
+        const bool sel = name == cur;
+        o += QStringLiteral("  ") + (sel ? green(QStringLiteral("●")) : QStringLiteral(" ")) +
+             QLatin1Char(' ') + (sel ? cyan(name) : name) +
+             dim(QStringLiteral(" — ") + OutputStyles::describe(name)) + QLatin1Char('\n');
+    }
+    o += dim(QStringLiteral("  set: /output-style <name>\n"));
+    return o;
+}
+
 Repl::Slash Repl::slash(const QString& input) {
     Slash s;
     if (!input.startsWith(QLatin1Char('/'))) return s;
@@ -1043,6 +1095,17 @@ Repl::Slash Repl::slash(const QString& input) {
                               dim(QStringLiteral(" — pure conversation, tools off.\n"))
                         : cyan(QStringLiteral("  agent mode")) +
                               dim(QStringLiteral(" — tools enabled.\n"));
+    } else if (cmd == QLatin1String("image")) {
+        if (args.isEmpty()) {
+            out = dim(QStringLiteral("  usage: /image <path> [prompt]   (also: @pic.png in any "
+                                     "message)\n"));
+        } else {
+            // Hand the whole line to the turn; runTurn's vision path recognises the
+            // leading /image form and attaches the picture.
+            s.prompt = input;
+        }
+    } else if (cmd == QLatin1String("output-style") || cmd == QLatin1String("style")) {
+        out = cmdOutputStyle(args);
     } else if (UserCmds::exists(cmd)) {
         // A user's own command from .ollamadev/commands/<name>.md. It expands to a
         // prompt template, so it is a turn, not a builtin — without this the REPL
@@ -1102,6 +1165,10 @@ int Repl::run() {
     banner();
     preflight();
     if (opt_.resume || !opt_.sessionId.isEmpty()) resumeNotice();
+
+    // A prompt given on the command line runs before we block on input, so
+    // `ollamadev chat "hi"` answers immediately and then keeps the thread open.
+    if (!opt_.initialPrompt.isEmpty()) runTurn(opt_.initialPrompt);
 
     while (true) {
         const auto raw = readInput();

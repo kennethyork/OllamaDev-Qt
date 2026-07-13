@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -10,6 +11,7 @@
 #include <optional>
 
 #include "Agent.h"
+#include "AgentDefs.h"
 #include "Backend.h"
 #include "Board.h"
 #include "CodeIndex.h"
@@ -104,7 +106,18 @@ void printHelp() {
           << "  ollamadev \"<prompt>\"        one-shot agent turn\n"
           << "  ollamadev backends           which providers are installed and how wide they run\n"
           << "  ollamadev models             list models on the active backend\n"
+          << "  ollamadev models presets|cloud|chain [--json]   curated catalog + fallback chain\n"
+          << "  ollamadev agents [show <n>]  file-defined subagent personas (.ollamadev/agents/*.md)\n"
           << "  ollamadev doctor             health check\n\n"
+          << "Chat & sessions:\n"
+          << "  ollamadev chat [\"<prompt>\"]  tool-free conversation (chat mode, no file edits)\n"
+          << "  ollamadev chat list|delete <id>   manage saved threads\n"
+          << "  ollamadev load <id>          resume a specific session\n"
+          << "  ollamadev resume             pick a recent session to resume\n\n"
+          << "Config & shell:\n"
+          << "  ollamadev config get <key>            read a dotted key\n"
+          << "  ollamadev config set <key> <value>    write it to ade-prefs.json (not config.json)\n"
+          << "  ollamadev completion bash|zsh|fish    print a sourceable completion script\n\n"
           << "Crew — the parallel bench (research → plan → N coders → audit → land):\n"
           << "  ollamadev crew \"<task>\"\n"
           << "  ollamadev crew accept <n>    apply held work into your folder\n"
@@ -299,6 +312,54 @@ int cmdScan(const QStringList& args) {
     if (findings.isEmpty()) out() << "clean\n";
     out().flush();
     return high > 0 ? 1 : 0;
+}
+
+// `ollamadev agents [list|show <name>]` — the file-defined personas a subagent
+// (the `task` tool) can adopt, from .ollamadev/agents/*.md (project shadows home).
+int cmdAgents(const QStringList& args) {
+    const QString sub = args.value(0);
+
+    if (sub == "show") {
+        const AgentDef d = AgentDefs::get(args.value(1));
+        if (d.isNull()) {
+            err() << "no agent '" << args.value(1) << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << "# " << d.name << "\n";
+        if (!d.description.isEmpty()) out() << d.description << "\n";
+        QStringList meta;
+        if (!d.model.isEmpty()) meta << "model: " + d.model;
+        if (!d.permission.isEmpty()) meta << "permission: " + d.permission;
+        if (!d.tools.isEmpty()) meta << "tools: " + d.tools.join(", ");
+        if (!meta.isEmpty()) out() << "(" << meta.join(" · ") << ")\n";
+        out() << "\n" << d.prompt << "\n";
+        out().flush();
+        return 0;
+    }
+
+    const QVector<AgentDef> all = AgentDefs::all();
+    if (all.isEmpty()) {
+        out() << "no custom agents — create one at .ollamadev/agents/<name>.md\n"
+                 "  (frontmatter: name, description, model, permission, tools; body = its system "
+                 "prompt),\n"
+                 "  then delegate to it: task(prompt, agent_type=\"<name>\").\n";
+        out().flush();
+        return 0;
+    }
+    out() << "Custom agents (" << all.size() << "):\n";
+    for (const AgentDef& d : all) {
+        out() << "  " << d.name.leftJustified(16) << "  "
+              << (d.description.isEmpty() ? QStringLiteral("no description") : d.description);
+        QStringList tags;
+        if (!d.model.isEmpty()) tags << d.model;
+        if (!d.permission.isEmpty()) tags << d.permission;
+        if (!d.tools.isEmpty()) tags << QStringLiteral("%1 tools").arg(d.tools.size());
+        if (!tags.isEmpty()) out() << "  [" << tags.join(", ") << "]";
+        out() << "\n";
+    }
+    out().flush();
+    return 0;
 }
 
 int cmdDoctor() {
@@ -1732,6 +1793,424 @@ int cmdEval(const QStringList& args) {
     return 0;
 }
 
+// ------------------------------------------------------------------- config
+
+// `true`/`false`/`null` and numbers are stored typed so `config get` round-trips
+// them (0.5 stays a JSON number, not the string "0.5"); everything else is a
+// string. Mirrors the PHP `config set` coercion.
+QJsonValue parseConfigValue(const QString& raw) {
+    if (raw == "true") return true;
+    if (raw == "false") return false;
+    if (raw == "null") return QJsonValue(QJsonValue::Null);
+    bool isInt = false;
+    const qlonglong iv = raw.toLongLong(&isInt);
+    if (isInt) return QJsonValue(double(iv));
+    bool isDouble = false;
+    const double dv = raw.toDouble(&isDouble);
+    if (isDouble) return QJsonValue(dv);
+    return raw;
+}
+
+QString renderConfigValue(const QJsonValue& v) {
+    switch (v.type()) {
+        case QJsonValue::Null: return QStringLiteral("null");
+        case QJsonValue::Bool: return v.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+        case QJsonValue::Double: return QString::number(v.toDouble(), 'g', 15);
+        case QJsonValue::String: return v.toString();
+        case QJsonValue::Array: return QString::fromUtf8(json::encode(v.toArray()));
+        case QJsonValue::Object: return QString::fromUtf8(json::encode(v.toObject()));
+        default: return {};
+    }
+}
+
+int cmdConfig(const QStringList& args) {
+    const QString sub = args.value(0, QStringLiteral("get"));
+
+    if (sub == "set") {
+        const QString key = args.value(1);
+        if (key.isEmpty()) {
+            err() << "usage: ollamadev config set <key> <value>\n";
+            err().flush();
+            return 2;
+        }
+        // setPref writes ade-prefs.json, never config.json (MCP-only by convention).
+        const QJsonValue val = parseConfigValue(args.value(2));
+        Config::setPref(key, val);
+        out() << "set " << key << " = " << renderConfigValue(val) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "get") {
+        const QString key = args.value(1);
+        if (key.isEmpty()) {
+            err() << "usage: ollamadev config get <key>\n";
+            err().flush();
+            return 2;
+        }
+        const QJsonValue v = Config::get(key);
+        if (v.isUndefined()) {
+            err() << "no such key: " << key << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << renderConfigValue(v) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    err() << "usage: ollamadev config get <key> | config set <key> <value>\n";
+    err().flush();
+    return 2;
+}
+
+// ------------------------------------------------------------------- models
+
+QStringList installedOllamaModels() {
+    auto b = Backends::get("ollama");
+    return (b && b->available()) ? b->models() : QStringList{};
+}
+
+QJsonObject presetJson(const Preset& p, bool cloud, bool installed) {
+    return QJsonObject{{"alias", p.alias},   {"tag", p.tag},       {"size", p.size},
+                       {"tools", p.tools},   {"vision", p.vision}, {"role", p.role},
+                       {"note", p.note},     {"cloud", cloud},     {"installed", installed}};
+}
+
+void printPresetRow(const Preset& p, const QStringList& installed) {
+    const bool have = !Models::match(p.tag, installed).isEmpty();
+    out() << QStringLiteral("  %1 %2 %3 %4 %5\n      %6\n")
+                 .arg(p.alias, -18)
+                 .arg(p.tag, -24)
+                 .arg(p.size.isEmpty() ? QStringLiteral("cloud") : p.size, -8)
+                 .arg(p.tools ? QStringLiteral("tools") : QStringLiteral("no-tools"), -8)
+                 .arg(have ? QStringLiteral("✓ installed") : QStringLiteral("not installed"))
+                 .arg(p.note);
+}
+
+int cmdModelsPresets(bool jsonOut) {
+    const QStringList installed = installedOllamaModels();
+    if (jsonOut) {
+        QJsonArray a;
+        for (const Preset& p : Models::presets())
+            a.append(presetJson(p, false, !Models::match(p.tag, installed).isEmpty()));
+        for (const Preset& p : Models::cloudPresets())
+            a.append(presetJson(p, true, !Models::match(p.tag, installed).isEmpty()));
+        out() << QString::fromUtf8(json::encode(a)) << "\n";
+        out().flush();
+        return 0;
+    }
+    out() << "Recommended models (pull with: ollamadev pull <alias>)\n\n";
+    out() << "  Local — run on your machine\n";
+    for (const Preset& p : Models::presets()) printPresetRow(p, installed);
+    out() << "\n  ☁ Cloud — run on Ollama's servers (needs `ollama signin`); prompts leave "
+             "this machine\n";
+    for (const Preset& p : Models::cloudPresets()) printPresetRow(p, installed);
+    out().flush();
+    return 0;
+}
+
+int cmdModelsCloud(bool jsonOut) {
+    const QStringList installed = installedOllamaModels();
+    if (jsonOut) {
+        QJsonArray a;
+        for (const Preset& p : Models::cloudPresets())
+            a.append(presetJson(p, true, !Models::match(p.tag, installed).isEmpty()));
+        out() << QString::fromUtf8(json::encode(a)) << "\n";
+        out().flush();
+        return 0;
+    }
+    out() << "☁ Ollama cloud models\n";
+    out() << "Run on Ollama's servers, reached through your local daemon — still Ollama-only,\n"
+             "but prompts leave this machine. Frontier-scale models without the local VRAM.\n\n";
+    out() << "  1. sign in once:  ollama signin\n"
+             "  2. pull one:      ollamadev pull <alias|tag>\n"
+             "  3. use it:        ollamadev -m <tag>\n\n";
+    for (const Preset& p : Models::cloudPresets()) printPresetRow(p, installed);
+    out() << "\nAny `<name>-cloud` / `:cloud` tag works too, not just these.\n";
+    out().flush();
+    return 0;
+}
+
+int cmdModelsChain(bool jsonOut) {
+    const QStringList installed = installedOllamaModels();
+    const QStringList chain = Models::chain();
+    const QString best = Models::bestInstalled(installed);
+    const bool configured = !Config::get("model.fallback").isUndefined();
+    const bool autoFallback = Config::boolean("model.autoFallback", true);
+
+    if (jsonOut) {
+        QJsonArray rows;
+        for (const QString& t : chain)
+            rows.append(QJsonObject{{"tag", t}, {"installed", !Models::match(t, installed).isEmpty()}});
+        out() << QString::fromUtf8(json::encode(QJsonObject{
+                     {"chain", rows}, {"best", best}, {"autoFallback", autoFallback}}))
+              << "\n";
+        out().flush();
+        return 0;
+    }
+    out() << "Tool-calling fallback chain"
+          << (configured ? " (from config model.fallback)" : " (default)") << ":\n";
+    for (const QString& t : chain) {
+        const QString hit = Models::match(t, installed);
+        out() << "  " << (hit.isEmpty() ? "·" : "✓") << " " << t
+              << (!hit.isEmpty() && hit != t ? QStringLiteral(" (%1)").arg(hit) : QString()) << "\n";
+    }
+    out() << "\n  Best installed: "
+          << (best.isEmpty() ? QStringLiteral("none — pull one: ollamadev pull qwen2.5-coder")
+                             : best)
+          << "\n";
+    out() << "  Auto-fallback when a model lacks tool support: " << (autoFallback ? "on" : "off")
+          << "  (config model.autoFallback)\n";
+    out().flush();
+    return 0;
+}
+
+// ------------------------------------------------------- sessions (chat/load/resume)
+
+QString relativeTime(qint64 unixSecs) {
+    if (unixSecs <= 0) return QStringLiteral("unknown");
+    const qint64 diff = QDateTime::currentSecsSinceEpoch() - unixSecs;
+    if (diff < 60) return QStringLiteral("just now");
+    if (diff < 3600) return QStringLiteral("%1m ago").arg(diff / 60);
+    if (diff < 86400) return QStringLiteral("%1h ago").arg(diff / 3600);
+    return QStringLiteral("%1d ago").arg(diff / 86400);
+}
+
+void printSessionRow(int n, const SessionMeta& s) {
+    QString title = s.title.simplified();
+    if (title.isEmpty()) title = QStringLiteral("(untitled)");
+    if (title.size() > 50) title = title.left(50) + QStringLiteral("…");
+    out() << QStringLiteral("  %1  %2 %3 · %4 msg · %5\n")
+                 .arg(n, 2)
+                 .arg(title, -52)
+                 .arg(s.model)
+                 .arg(s.messages)
+                 .arg(relativeTime(s.updated));
+}
+
+// Shared by `resume`, `chat` (no prompt when stdin is not a tty), etc.: run the
+// REPL on a specific session, in chat mode or agent mode as asked.
+int runRepl(const QString& sessionId, bool chat, const QStringList& args) {
+    ReplOptions o;
+    o.backend = flagValue(args, "--backend");
+    o.model = flagValue(args, "--model", flagValue(args, "-m"));
+    o.sessionId = sessionId;
+    o.chat = chat;
+    return Repl(o).run();
+}
+
+int cmdLoad(const QStringList& args) {
+    const QString id = args.value(0);
+    if (id.isEmpty() || id.startsWith('-')) {
+        err() << "usage: ollamadev load <session-id>   (list them: ollamadev resume)\n";
+        err().flush();
+        return 2;
+    }
+    if (!Session::load(id)) {
+        err() << "session not found: " << id << "\n";
+        err().flush();
+        return 1;
+    }
+    return runRepl(id, false, args);
+}
+
+int cmdResume(const QStringList& args) {
+    QVector<SessionMeta> sessions = Session::list();  // newest first
+    if (sessions.isEmpty()) {
+        out() << "  No previous sessions to resume.\n";
+        out().flush();
+        return 0;
+    }
+    if (sessions.size() > 20) sessions.resize(20);
+
+    out() << "\n  Resume a session\n\n";
+    for (int i = 0; i < sessions.size(); ++i) printSessionRow(i + 1, sessions.at(i));
+    out() << "\n  Enter a number to resume (or blank to cancel): ";
+    out().flush();
+
+    const QString choice = QTextStream(stdin).readLine().trimmed();
+    bool ok = false;
+    const int idx = choice.toInt(&ok) - 1;
+    if (choice.isEmpty() || !ok) {
+        out() << "  cancelled.\n";
+        out().flush();
+        return 0;
+    }
+    if (idx < 0 || idx >= sessions.size()) {
+        out() << "  out of range.\n";
+        out().flush();
+        return 1;
+    }
+    return runRepl(sessions.at(idx).id, false, args);
+}
+
+// Tool-free chat threads. `chat` (with an optional prompt) is a REPL in chat mode;
+// list/delete manage the same per-project session store the agent uses.
+int cmdChat(const QStringList& args) {
+    const QString sub = args.value(0);
+
+    if (sub == "list") {
+        const auto sessions = Session::list();
+        if (sessions.isEmpty()) {
+            out() << "no chats yet — start one: ollamadev chat\n";
+            out().flush();
+            return 0;
+        }
+        for (int i = 0; i < sessions.size(); ++i) {
+            const SessionMeta& s = sessions.at(i);
+            out() << "  " << s.id << "  " << (s.title.isEmpty() ? QStringLiteral("(untitled)")
+                                                                : s.title.simplified())
+                  << "  " << s.model << " · " << s.messages << " msg · "
+                  << relativeTime(s.updated) << "\n";
+        }
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "delete" || sub == "rm") {
+        const QString id = args.value(1);
+        if (id.isEmpty()) {
+            err() << "usage: ollamadev chat delete <session-id>\n";
+            err().flush();
+            return 2;
+        }
+        if (!Session::remove(id)) {
+            err() << "no chat '" << id << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ removed " << id << "\n";
+        out().flush();
+        return 0;
+    }
+
+    // Anything else is the opening prompt (join the non-flag words), or empty for a
+    // bare interactive chat.
+    static const QStringList takesValue{"--backend", "--model", "-m"};
+    QStringList words;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args.at(i).startsWith('-')) {
+            if (takesValue.contains(args.at(i))) ++i;
+            continue;
+        }
+        words << args.at(i);
+    }
+    ReplOptions o;
+    o.backend = flagValue(args, "--backend");
+    o.model = flagValue(args, "--model", flagValue(args, "-m"));
+    o.chat = true;
+    o.initialPrompt = words.join(' ');
+    return Repl(o).run();
+}
+
+// --------------------------------------------------------------- completion
+
+int cmdCompletion(const QStringList& args) {
+    const QString shell = args.value(0, QStringLiteral("bash"));
+
+    // The top-level verbs the CLI dispatches, kept here so the completion offers the
+    // same set the code actually handles.
+    static const char* kTopLevel =
+        "chat models backends doctor crew board index code-search search skills memory "
+        "config completion load resume pull setup context stats diff commit ship pr git "
+        "test verify watch terminal hooks commands mcp scan voice transcribe lsp eval "
+        "help --help --version --backend --model --continue --resume -h -v -m -c";
+
+    if (shell == "bash") {
+        out() << "# OllamaDev bash completion — install: ollamadev completion bash >> ~/.bashrc\n"
+                 "_ollamadev() {\n"
+                 "    local cur prev\n"
+                 "    COMPREPLY=()\n"
+                 "    cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+                 "    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
+                 "    case \"${prev}\" in\n"
+                 "        models)\n"
+                 "            COMPREPLY=($(compgen -W 'presets cloud chain' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        config)\n"
+                 "            COMPREPLY=($(compgen -W 'get set' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        completion)\n"
+                 "            COMPREPLY=($(compgen -W 'bash zsh fish' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        chat)\n"
+                 "            COMPREPLY=($(compgen -W 'list delete' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        crew)\n"
+                 "            COMPREPLY=($(compgen -W 'accept discard steer role pack clear' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        terminal)\n"
+                 "            COMPREPLY=($(compgen -W 'create spawn list attach start stop broadcast send delete log' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        git)\n"
+                 "            COMPREPLY=($(compgen -W 'status diff log branch checkout commit add push pull stash show' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        --backend)\n"
+                 "            COMPREPLY=($(compgen -W 'ollama claude codex gemini cursor-agent opencode qwen aider goose amp crush droid' -- \"${cur}\"))\n"
+                 "            return 0 ;;\n"
+                 "        *)\n"
+                 "            COMPREPLY=($(compgen -W '"
+              << kTopLevel
+              << "' -- \"${cur}\")) ;;\n"
+                 "    esac\n"
+                 "    return 0\n"
+                 "}\n"
+                 "complete -F _ollamadev ollamadev\n";
+        out().flush();
+        return 0;
+    }
+
+    if (shell == "zsh") {
+        out() << "#compdef ollamadev\n"
+                 "_ollamadev() {\n"
+                 "    local -a commands\n"
+                 "    commands=(\n"
+                 "        'chat:Tool-free chat thread'\n"
+                 "        'models:List models (presets, cloud, chain)'\n"
+                 "        'backends:Show installed providers'\n"
+                 "        'crew:Run the parallel agent bench'\n"
+                 "        'board:Pending decisions'\n"
+                 "        'config:Get or set a config key'\n"
+                 "        'load:Resume a specific session'\n"
+                 "        'resume:Pick a recent session to resume'\n"
+                 "        'pull:Download a model from Ollama'\n"
+                 "        'git:Git porcelain'\n"
+                 "        'lsp:Language server for IDEs'\n"
+                 "        'eval:Measure the agent pass rate'\n"
+                 "        'diff:Working-tree diff'\n"
+                 "        'ship:Stage, scan, commit, push'\n"
+                 "        'help:Show help'\n"
+                 "    )\n"
+                 "    _describe 'command' commands\n"
+                 "}\n"
+                 "_ollamadev \"$@\"\n";
+        out().flush();
+        return 0;
+    }
+
+    if (shell == "fish") {
+        out() << "# OllamaDev fish completion\n"
+                 "complete -c ollamadev -n '__fish_use_subcommand' -a 'chat models backends doctor "
+                 "crew board config load resume pull git lsp eval diff commit ship pr' -d 'Command'\n"
+                 "complete -c ollamadev -n '__fish_seen_subcommand_from models' -a 'presets cloud "
+                 "chain' -d 'Models subcommand'\n"
+                 "complete -c ollamadev -n '__fish_seen_subcommand_from config' -a 'get set' -d "
+                 "'Config subcommand'\n"
+                 "complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log "
+                 "branch checkout commit add push pull stash show' -d 'Git command'\n"
+                 "complete -c ollamadev -s h -l help -d 'Show help'\n"
+                 "complete -c ollamadev -s v -l version -d 'Show version'\n"
+                 "complete -c ollamadev -s m -l model -d 'Use a specific model' -r\n";
+        out().flush();
+        return 0;
+    }
+
+    err() << "usage: ollamadev completion [bash|zsh|fish]\n";
+    err().flush();
+    return 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1783,6 +2262,7 @@ int main(int argc, char** argv) {
     if (cmd == "search") return cmdSearch(rest);
 
     if (cmd == "backends") return cmdBackends();
+    if (cmd == "agents") return cmdAgents(rest);
     if (cmd == "doctor") return cmdDoctor();
 
     if (cmd == "pull") {
@@ -1847,7 +2327,21 @@ int main(int argc, char** argv) {
     if (cmd == "test") return cmdTest(rest);
     if (cmd == "verify") return cmdVerify(rest);
 
+    if (cmd == "config") return cmdConfig(rest);
+    if (cmd == "completion") return cmdCompletion(rest);
+    if (cmd == "chat") return cmdChat(rest);
+    if (cmd == "load") return cmdLoad(rest);
+    if (cmd == "resume") return cmdResume(rest);
+
     if (cmd == "models") {
+        // presets / cloud / chain are catalog views; a bare `models` still lists what
+        // is installed on the active backend.
+        const QString sub = rest.value(0);
+        const bool jsonOut = hasFlag(args, "--json");
+        if (sub == "presets" || sub == "recommended") return cmdModelsPresets(jsonOut);
+        if (sub == "cloud") return cmdModelsCloud(jsonOut);
+        if (sub == "chain") return cmdModelsChain(jsonOut);
+
         const QString id = flagValue(args, "--backend", Config::str("model.backend", "ollama"));
         auto b = Backends::get(id);
         if (!b || !b->available()) {
