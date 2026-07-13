@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QThread>
 
 #include "Backend.h"
 #include "Config.h"

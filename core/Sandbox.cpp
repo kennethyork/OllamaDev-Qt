@@ -32,6 +32,13 @@ constexpr int kBinarySniffBytes = 8000;
 // rewritten 200KB file would cost O(N*M) and hang the capture.
 constexpr int kMaxSnakeD = 3000;
 
+// excludes() returns by value, so begin()/end() on two separate calls would be
+// iterators into two different temporaries. Materialise it once.
+QSet<QString> excludeSet() {
+    const QStringList ex = Sandbox::excludes();
+    return QSet<QString>(ex.begin(), ex.end());
+}
+
 QByteArray readAll(const QString& path) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return {};
@@ -181,16 +188,30 @@ QString binaryStub(const QString& path) {
 }  // namespace
 
 QStringList Sandbox::excludes() {
-    return {QStringLiteral(".git"),      QStringLiteral(".hg"),          QStringLiteral(".svn"),
-            QStringLiteral(".ollamadev"), QStringLiteral("node_modules"), QStringLiteral(".DS_Store"),
-            QStringLiteral("ollamadev-crew")};
+    // Beyond the obvious VCS/vendor dirs, these are here because a coder that
+    // RUNS its own work (a python import, a test) leaves interpreter and test
+    // caches behind in the sandbox. Those are not the coder's changes, and
+    // without this they get captured into the changeset and land in the user's
+    // project on accept.
+    return {QStringLiteral(".git"),
+            QStringLiteral(".hg"),
+            QStringLiteral(".svn"),
+            QStringLiteral(".ollamadev"),
+            QStringLiteral("node_modules"),
+            QStringLiteral(".DS_Store"),
+            QStringLiteral("ollamadev-crew"),
+            QStringLiteral("__pycache__"),
+            QStringLiteral(".pytest_cache"),
+            QStringLiteral(".mypy_cache"),
+            QStringLiteral(".ruff_cache"),
+            QStringLiteral(".gradle"),
+            QStringLiteral(".venv")};
 }
 
 QHash<QString, QString> Sandbox::listFiles(const QString& root) {
     QHash<QString, QString> out;
     if (!QFileInfo(root).isDir()) return out;
-    const QSet<QString> excl(excludes().begin(), excludes().end());
-    walk(QDir(root).absolutePath(), QString(), excl, &out, nullptr);
+    walk(QDir(root).absolutePath(), QString(), excludeSet(), &out, nullptr);
     return out;
 }
 
@@ -201,10 +222,9 @@ bool Sandbox::copyTree(const QString& src, const QString& dst, QString* err) {
         if (err) *err = QStringLiteral("source is not a directory: ") + from;
         return false;
     }
-    const QSet<QString> excl(excludes().begin(), excludes().end());
     QHash<QString, QString> files;
     QStringList dirs;
-    walk(from, QString(), excl, &files, &dirs);
+    walk(from, QString(), excludeSet(), &files, &dirs);
 
     // Directories first, serially: cheap, and it means the parallel file jobs
     // never have to create a directory (no mkdir storm, no races).
@@ -446,26 +466,38 @@ QString Sandbox::unifiedDiff(const QString& path, const QString& oldText, const 
     const QStringList oldLines = splitLines(oldText, &oldNoEol);
     const QStringList newLines = splitLines(newText, &newNoEol);
 
-    out += oldText.isEmpty()
-               ? QStringLiteral("--- /dev/null\n+++ b/%1\n").arg(path)
-               : (newText.isEmpty() ? QStringLiteral("--- a/%1\n+++ /dev/null\n").arg(path)
-                                    : QStringLiteral("--- a/%1\n+++ b/%1\n").arg(path));
+    // The `new file mode` / `deleted file mode` lines are not decoration: without
+    // them `git apply` strips /dev/null with -p1 and rejects the patch. 100644 is
+    // an assumption — unifiedDiff only sees text, not the file's real mode.
+    if (oldText.isEmpty())
+        out += QStringLiteral("new file mode 100644\n--- /dev/null\n+++ b/%1\n").arg(path);
+    else if (newText.isEmpty())
+        out += QStringLiteral("deleted file mode 100644\n--- a/%1\n+++ /dev/null\n").arg(path);
+    else
+        out += QStringLiteral("--- a/%1\n+++ b/%1\n").arg(path);
 
     // Intern lines to ints: the diff compares each pair many times, and int
     // compares beat QString compares by a wide margin on large files.
+    //
+    // A final line with no trailing newline is NOT the same line as one with it,
+    // or a file that only gained/lost its last newline would diff to nothing.
+    // The sentinel gives it a distinct identity so it shows up as a -/+ pair.
     QHash<QString, int> ids;
-    const auto idOf = [&ids](const QString& s) {
-        const auto it = ids.constFind(s);
+    const auto idOf = [&ids](const QString& s, bool bare) {
+        const QString key = bare ? s + QChar(0x1) : s;
+        const auto it = ids.constFind(key);
         if (it != ids.constEnd()) return it.value();
-        const int id = ids.size();
-        ids.insert(s, id);
+        const int id = int(ids.size());
+        ids.insert(key, id);
         return id;
     };
     QVector<int> a, b;
     a.reserve(oldLines.size());
     b.reserve(newLines.size());
-    for (const QString& l : oldLines) a.append(idOf(l));
-    for (const QString& l : newLines) b.append(idOf(l));
+    for (int k = 0; k < oldLines.size(); ++k)
+        a.append(idOf(oldLines[k], oldNoEol && k == oldLines.size() - 1));
+    for (int k = 0; k < newLines.size(); ++k)
+        b.append(idOf(newLines[k], newNoEol && k == newLines.size() - 1));
 
     QVector<bool> aMod(a.size(), false), bMod(b.size(), false);
     diffRec(a, 0, a.size(), b, 0, b.size(), &aMod, &bMod);

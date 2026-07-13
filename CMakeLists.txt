@@ -13,9 +13,14 @@ endif()
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Network Concurrent Widgets)
 qt_standard_project_setup()
 
+# The CLI must build without a GUI toolchain — headless boxes and CI want it alone.
+option(ODV_BUILD_ADE "Build the Qt desktop app" ON)
+
 add_subdirectory(core)
 add_subdirectory(cli)
-add_subdirectory(ade)
+if(ODV_BUILD_ADE)
+    add_subdirectory(ade)
+endif()
 
 enable_testing()
 add_subdirectory(tests)

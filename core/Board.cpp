@@ -274,8 +274,9 @@ void Board::clear() {
 }
 
 QString Board::waitFor(const QString& id, int timeoutSeconds) {
-    QDeadlineTimer deadline(timeoutSeconds > 0 ? qint64(timeoutSeconds) * 1000
-                                               : QDeadlineTimer::Forever);
+    const QDeadlineTimer deadline = timeoutSeconds > 0
+                                        ? QDeadlineTimer(qint64(timeoutSeconds) * 1000)
+                                        : QDeadlineTimer(QDeadlineTimer::Forever);
     while (true) {
         const std::optional<Decision> d = get(id);
         // The record is gone (board cleared, log rotated). Fail closed — this

@@ -129,15 +129,31 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         if (!research.isEmpty()) usr += "\n\nResearch findings:\n" + research.left(6000);
 
         auto backend = Backends::get(d.backendId());
-        QJsonObject planned =
-            backend ? backend->chatJson(d.model(),
-                                        {{"system", sys, {}, {}, {}, {}, {}},
-                                         {"user", usr, {}, {}, {}, {}, {}}},
-                                        cancel)
-                    : QJsonObject{};
+
+        // Models do not reliably honour the schema on the first try — a cloud
+        // model in particular will sometimes answer in prose. One firm retry
+        // costs a few seconds and turns an intermittent "no subtasks" failure
+        // into a non-event.
+        QJsonArray planned;
+        for (int attempt = 0; attempt < 2 && backend && !cancel.cancelled(); ++attempt) {
+            QString ask = usr;
+            if (attempt > 0)
+                ask += "\n\nYour previous reply could not be parsed. Reply with NOTHING but the "
+                       "JSON object described above.";
+            const QJsonObject o =
+                backend->chatJson(d.model(),
+                                  {{"system", sys, {}, {}, {}, {}, {}},
+                                   {"user", ask, {}, {}, {}, {}, {}}},
+                                  cancel);
+            planned = o.value("subtasks").toArray();
+            // Tolerate a bare array, or a single object, the way the PHP planner did.
+            if (planned.isEmpty() && o.contains("title")) planned.append(o);
+            if (!planned.isEmpty()) break;
+            if (attempt == 0 && ev.onLog) ev.onLog("director reply did not parse — retrying");
+        }
 
         int n = 0;
-        for (const auto& v : planned.value("subtasks").toArray()) {
+        for (const auto& v : planned) {
             if (n >= maxCoders) break;
             const auto o = v.toObject();
             Subtask s;

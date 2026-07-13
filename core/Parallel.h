@@ -1,5 +1,6 @@
 #pragma once
 #include <QHash>
+#include <QJsonObject>
 #include <QMutex>
 #include <QSemaphore>
 #include <QString>

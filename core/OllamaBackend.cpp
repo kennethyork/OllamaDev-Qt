@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <algorithm>
+#include <utility>
 
 #include "Config.h"
 #include "Json.h"
@@ -152,7 +153,9 @@ OllamaBackend::HttpResult OllamaBackend::request(const char* verb, const QString
     loop.exec();
     poll.stop();
 
-    r.body.append(reply->readAll());
+    // abort() closes the device, and reading a closed QNetworkReply warns; the
+    // bytes we already drained in readyRead are all there is anyway.
+    if (reply->isOpen()) r.body.append(reply->readAll());
     r.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     r.netError = static_cast<int>(reply->error());
     if (cancelled) {

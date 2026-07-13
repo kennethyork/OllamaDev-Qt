@@ -396,6 +396,8 @@ QString Tools::threadRoot() {
     return g_threadRoot.isEmpty() ? QDir::currentPath() : g_threadRoot;
 }
 
+bool Tools::hasThreadRoot() { return !g_threadRoot.isEmpty(); }
+
 QString Tools::resolvePath(const QString& p, bool* ok) {
     if (ok) *ok = true;
     QString in = p.trimmed();
