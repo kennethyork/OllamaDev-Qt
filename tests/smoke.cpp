@@ -138,6 +138,67 @@ static void testBackends() {
           "a cloud model is allowed more concurrency than a local one");
 }
 
+// ---------------------------------------------------------------------------
+// Regressions carried over from the PHP app. Both of these shipped in v0.9.78
+// and are the reason this port exists in its current shape. They are asserted
+// against the SOURCE, because both are bugs of omission — you cannot catch
+// "somebody added a global pkill" by exercising a happy path.
+// ---------------------------------------------------------------------------
+
+// Code only, comments stripped. A guard that scanned comments too would fire on
+// the comment that documents the very flag it is guarding against — which is
+// exactly what happened the first time.
+static QString readSource(const QString& rel) {
+    QFile f(QStringLiteral(ODV_SOURCE_DIR) + "/" + rel);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    QString code;
+    for (const QString& line : QString::fromUtf8(f.readAll()).split('\n')) {
+        const int c = line.indexOf(QStringLiteral("//"));
+        code += (c >= 0 ? line.left(c) : line) + '\n';
+    }
+    return code;
+}
+
+static void testNoGlobalProcessNuking() {
+    // PHP bug: Desktop/ollamadev-ade/index.php:71 ran PtyManager::cleanupStale()
+    // on boot — `pkill -9 -f '__pty-daemon__'` plus `rm -rf ~/.ollamadev/terminals/*`.
+    // Launching a SECOND instance therefore killed the FIRST one's live terminals.
+    // Here every Pty is a child QObject of the widget that spawned it, so there is
+    // nothing global to clean. Keep it that way.
+    bool clean = true;
+    for (const QString& f : {QStringLiteral("ade/MainWindow.cpp"),
+                             QStringLiteral("ade/TerminalWidget.cpp"),
+                             QStringLiteral("ade/main.cpp"), QStringLiteral("core/Pty.cpp")}) {
+        const QString src = readSource(f);
+        if (src.isEmpty()) {
+            clean = false;
+            break;
+        }
+        // A process-wide kill by name, or wiping a shared terminals dir, would
+        // reintroduce the second-instance bug.
+        if (src.contains("pkill") || src.contains("killall") ||
+            src.contains("cleanupStale")) {
+            clean = false;
+        }
+    }
+    check(clean, "no instance-global process kill (2nd ADE must not kill the 1st's terminals)");
+}
+
+static void testCliArgvIsCurrent() {
+    // PHP bug: src/52-model-client.php:135 pinned flags that these CLIs removed,
+    // so --backend claude|codex|qwen was broken in the shipping app. Assert we
+    // never resurrect the dead flags.
+    const QString src = readSource(QStringLiteral("core/CliBackend.cpp"));
+    check(!src.isEmpty(), "CliBackend source is readable");
+    check(!src.contains("--tools"), "claude: --tools was removed from the CLI");
+    check(!src.contains("--ask-for-approval"),
+          "codex: --ask-for-approval was removed from `exec`");
+    check(!src.contains("--approval-mode plan") && !src.contains("--input-format"),
+          "qwen: --approval-mode plan / --input-format do not exist");
+    check(src.contains("--skip-trust"),
+          "gemini: --skip-trust is required or yolo silently downgrades and hangs");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -149,6 +210,7 @@ int main(int argc, char** argv) {
     s << "sandbox\n";    s.flush(); testSandbox();
     s << "parallel\n";   s.flush(); testLimiter();
     s << "backends\n";   s.flush(); testBackends();
+    s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

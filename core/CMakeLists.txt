@@ -14,6 +14,14 @@ add_library(odv-core STATIC
     Agent.cpp Agent.h
     Crew.cpp Crew.h
     Pty.cpp Pty.h
+    Session.cpp Session.h
+    Skills.cpp Skills.h
+    Memory.cpp Memory.h
+    Mcp.cpp Mcp.h
+    CodeIndex.cpp CodeIndex.h
+    WebSearch.cpp WebSearch.h
+    Stt.cpp Stt.h
+    Tui.cpp Tui.h
 )
 
 target_include_directories(odv-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
