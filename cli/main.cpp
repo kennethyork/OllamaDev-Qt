@@ -3,7 +3,11 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 #include <QTextStream>
+
+#include <optional>
 
 #include "Agent.h"
 #include "Backend.h"
@@ -11,6 +15,8 @@
 #include "CodeIndex.h"
 #include "Config.h"
 #include "Crew.h"
+#include "GitFlow.h"
+#include "Hooks.h"
 #include "Json.h"
 #include "Mcp.h"
 #include "Memory.h"
@@ -20,8 +26,11 @@
 #include "SecScan.h"
 #include "Skills.h"
 #include "Stt.h"
+#include "Terminals.h"
 #include "Tools.h"
+#include "Verify.h"
 #include "Version.h"
+#include "Watch.h"
 #include "WebSearch.h"
 
 using namespace odv;
@@ -103,6 +112,34 @@ void printHelp() {
           << "  ollamadev search \"<q>\"       web search\n"
           << "  ollamadev skills             progressive-disclosure skills (list/add/install)\n"
           << "  ollamadev memory             wiki-linked notes (new/list/show/graph)\n\n"
+          << "Ship it — the AI git workflow:\n"
+          << "  ollamadev diff [--json]      the working-tree diff, for review\n"
+          << "  ollamadev commit [-a] [-m]   AI commit message; a leaked secret BLOCKS it\n"
+          << "  ollamadev ship [--yes]       stage → scan → AI commit → ask, then push\n"
+          << "  ollamadev pr create|review   draft a PR · review one with the model (needs gh)\n"
+          << "  ollamadev git <sub>          status, diff, log, branch, checkout, add,\n"
+          << "                               commit, push, pull, stash, show\n"
+          << "  --force bypasses the secret gate. --yes only auto-answers the prompts —\n"
+          << "  automation may skip the questions, it may not overrule a leaked credential.\n"
+          << "  Commits run on `git.model` if set, so they can use a smaller model than chat.\n\n"
+          << "Tests:\n"
+          << "  ollamadev test               detect and run this project's tests\n"
+          << "  ollamadev verify [--max N]   run them, and let the agent fix failures until green\n\n"
+          << "Always-on:\n"
+          << "  ollamadev watch \"<task>\" [paths…]   re-run a task whenever files change\n"
+          << "                               --interval N (debounce) · --once (run now, then exit)\n"
+          << "  ollamadev terminal create <name>    a named, long-lived pty that outlives this\n"
+          << "                               command — the desktop and the CLI share them\n"
+          << "  ollamadev terminal spawn <name> <cmd…>   the same, running one command\n"
+          << "  ollamadev terminal list|start|stop|delete|log <name>\n"
+          << "  ollamadev terminal attach <name>   your tty in, its output out (Ctrl-] detaches)\n"
+          << "  ollamadev terminal send <name> \"<text>\" · terminal broadcast \"<text>\"\n\n"
+          << "Automation:\n"
+          << "  ollamadev hooks              shell hooks on tool/session events (list/add/remove)\n"
+          << "                               PreToolUse BLOCKS the tool on a non-zero exit;\n"
+          << "                               read from your HOME config only, never from a repo\n"
+          << "  ollamadev commands           your own /slash commands (prompt templates)\n"
+          << "  ollamadev /<name> [args]     run one as a single turn\n\n"
           << "Integration:\n"
           << "  ollamadev mcp serve          expose these tools to any MCP client (stdio)\n"
           << "  ollamadev mcp list|add|rm    MCP servers this agent can call\n"
@@ -943,6 +980,595 @@ int cmdCrewPack(const QStringList& args) {
     return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Git workflow (GitFlow) and test/verify (Verify).
+// ---------------------------------------------------------------------------
+
+// The backend + model the AI git commands run on. GitFlow::modelFor() then gives
+// the dedicated `git.model` key the last word, so commits can run on a small fast
+// model while chat stays on a big one.
+QString gitBackend(const QStringList& args) {
+    return flagValue(args, "--backend", Config::str("model.backend", "ollama"));
+}
+QString gitModel(const QStringList& args) {
+    const QString m = flagValue(args, "--model", flagValue(args, "-m"));
+    if (!m.isEmpty()) return m;
+    auto b = Backends::get(gitBackend(args));
+    return b ? b->defaultModel() : QString();
+}
+
+// stdin y/N. Core owns no terminal, so the confirmation the commit/push path asks
+// for is answered here.
+bool askYesNo(const QString& prompt) {
+    out() << prompt << " [y/N] ";
+    out().flush();
+    QTextStream in(stdin);
+    const QString a = in.readLine().trimmed().toLower();
+    return a == "y" || a == "yes";
+}
+
+void printFindings(const QVector<Finding>& findings) {
+    for (const auto& f : findings)
+        err() << "  " << f.severity << "  " << f.rule << "  line " << f.line << "  " << f.redacted
+              << "\n";
+}
+
+int cmdDiff(const QStringList& args) {
+    if (!GitFlow::isRepo()) {
+        err() << "not a git repository\n";
+        err().flush();
+        return 1;
+    }
+    const QString diff = GitFlow::workingDiff();
+
+    if (hasFlag(args, "--json")) {
+        QJsonArray findings;
+        for (const auto& f : SecScan::scanDiff(diff)) {
+            findings.append(QJsonObject{{"rule", f.rule},
+                                        {"severity", f.severity},
+                                        {"line", f.line},
+                                        {"redacted", f.redacted}});
+        }
+        const QJsonObject o{
+            {"branch", GitFlow::branch()}, {"diff", diff}, {"findings", findings}};
+        out() << QString::fromUtf8(json::encode(o)) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (diff.trimmed().isEmpty()) {
+        out() << "no changes\n";
+        out().flush();
+        return 0;
+    }
+    for (const QString& line : diff.split('\n')) {
+        // +++/--- are headers, not content; colouring them as add/remove makes every
+        // hunk look like it both added and deleted a file.
+        if (line.startsWith("+++") || line.startsWith("---"))
+            out() << "\033[1m" << line << "\033[0m\n";
+        else if (line.startsWith('+'))
+            out() << "\033[32m" << line << "\033[0m\n";
+        else if (line.startsWith('-'))
+            out() << "\033[31m" << line << "\033[0m\n";
+        else if (line.startsWith("@@"))
+            out() << "\033[36m" << line << "\033[0m\n";
+        else
+            out() << line << "\n";
+    }
+    out().flush();
+    return 0;
+}
+
+// Shared reporting for commit/ship, so a blocked commit reads the same either way.
+int reportCommit(const CommitResult& r) {
+    if (r.blocked) {
+        err() << "\n\033[31m✗ blocked: " << r.error << "\033[0m\n";
+        printFindings(r.findings);
+        err() << "\nFix them, or commit anyway with --force.\n";
+        err().flush();
+        return 1;
+    }
+    if (!r.ok) {
+        err() << "✗ " << r.error << "\n";
+        err().flush();
+        return 1;
+    }
+    out() << "\033[32m✓ committed\033[0m " << r.sha << "\n\n" << r.message << "\n";
+    out().flush();
+    return 0;
+}
+
+int cmdCommit(const QStringList& args) {
+    CommitOptions o;
+    o.stageAll = hasFlag(args, "-a");
+    o.message = flagValue(args, "-m");
+    o.force = hasFlag(args, "--force");
+    o.backendId = gitBackend(args);
+    o.model = gitModel(args);
+
+    if (o.message.isEmpty()) {
+        out() << "\033[2mwriting a commit message…\033[0m\n";
+        out().flush();
+    }
+    // No Confirm: plain `commit` is not a remote-visible step, so it just commits.
+    return reportCommit(GitFlow::commit(o, {}, CancelToken{}));
+}
+
+int cmdShip(const QStringList& args) {
+    CommitOptions o;
+    o.stageAll = true;  // ship means "everything I have"
+    o.message = flagValue(args, "-m");
+    o.force = hasFlag(args, "--force");
+    o.assumeYes = hasFlag(args, "--yes");
+    o.askBeforeCommit = true;
+    o.backendId = gitBackend(args);
+    o.model = gitModel(args);
+
+    if (o.message.isEmpty()) {
+        out() << "\033[2mstaging, scanning, writing a commit message…\033[0m\n";
+        out().flush();
+    }
+
+    // --yes answers the QUESTIONS (commit, push) so CI can run unattended. It never
+    // answers the secret gate — that is decided inside GitFlow::commit() before this
+    // is ever called, and only --force opens it.
+    const ShipResult r = GitFlow::ship(
+        o, [&o](const QString& prompt) { return o.assumeYes ? true : askYesNo(prompt); },
+        CancelToken{});
+
+    if (!r.commit.ok) return reportCommit(r.commit);
+    reportCommit(r.commit);
+    if (r.pushed) {
+        out() << "\033[32m✓ pushed\033[0m\n";
+        out().flush();
+        return 0;
+    }
+    err() << "\033[33m" << r.error << "\033[0m\n";
+    err().flush();
+    return r.error == "committed, not pushed" ? 0 : 1;
+}
+
+int cmdPr(const QStringList& args) {
+    const QString sub = args.value(0);
+    if (!GitFlow::isRepo()) {
+        err() << "not a git repository\n";
+        err().flush();
+        return 1;
+    }
+    if (!GitFlow::hasGh()) {
+        err() << "`pr` needs the GitHub CLI. Install `gh` and run `gh auth login`.\n"
+                 "Everything else (diff, commit, ship, git) works without it.\n";
+        err().flush();
+        return 1;
+    }
+
+    if (sub == "create") {
+        QString base = flagValue(args, "--base");
+        if (base.isEmpty()) {
+            // The remote's default branch, if git knows it; otherwise let the user say.
+            const GitResult r = GitFlow::git(
+                {"rev-parse", "--abbrev-ref", "--verify", "origin/HEAD"});
+            base = r.ok() ? r.output.trimmed().section('/', 1) : QStringLiteral("main");
+        }
+        const QString range = base + "..HEAD";
+        const QString commits = GitFlow::git({"--no-pager", "log", "--oneline", range}).output;
+        const QString diff = GitFlow::git({"--no-pager", "diff", base + "...HEAD"}).output;
+        if (commits.trimmed().isEmpty()) {
+            err() << "no commits on this branch vs " << base << "\n";
+            err().flush();
+            return 1;
+        }
+
+        out() << "\033[2mdrafting the PR…\033[0m\n";
+        out().flush();
+        QString title, body;
+        GitFlow::prText(commits, diff, gitBackend(args), GitFlow::modelFor(gitModel(args)), &title,
+                        &body, CancelToken{});
+
+        out() << "\n\033[1m" << title << "\033[0m\n\n" << body << "\n\n";
+        out().flush();
+        if (!askYesNo("Open this PR?")) {
+            out() << "cancelled\n";
+            out().flush();
+            return 0;
+        }
+
+        // Flags verified against `gh pr create --help`: -B/--base, -t/--title,
+        // -F/--body-file with "-" reading the body from stdin (a PR body is markdown
+        // with newlines — argv is the wrong place for it).
+        QProcess gh;
+        gh.setProgram("gh");
+        gh.setArguments({"pr", "create", "--base", base, "--title", title, "--body-file", "-"});
+        gh.setWorkingDirectory(Tools::threadRoot());
+        gh.setProcessChannelMode(QProcess::MergedChannels);
+        gh.start();
+        if (!gh.waitForStarted(10000)) {
+            err() << "could not run gh\n";
+            err().flush();
+            return 1;
+        }
+        gh.write(body.toUtf8());
+        gh.closeWriteChannel();
+        gh.waitForFinished(120000);
+        out() << QString::fromUtf8(gh.readAll());
+        out().flush();
+        return gh.exitCode();
+    }
+
+    if (sub == "review") {
+        const QString n = args.value(1);
+        if (n.isEmpty()) {
+            err() << "usage: ollamadev pr review <n> [--comment]\n";
+            err().flush();
+            return 1;
+        }
+        QProcess diffProc;
+        diffProc.setProgram("gh");
+        diffProc.setArguments({"pr", "diff", n});
+        diffProc.setWorkingDirectory(Tools::threadRoot());
+        diffProc.start();
+        diffProc.waitForFinished(120000);
+        const QString diff = QString::fromUtf8(diffProc.readAllStandardOutput());
+        if (diff.trimmed().isEmpty()) {
+            err() << "could not fetch the diff for PR #" << n << "\n";
+            err().flush();
+            return 1;
+        }
+
+        out() << "\033[2mreviewing PR #" << n << "…\033[0m\n";
+        out().flush();
+        const PrReview rv =
+            GitFlow::review(diff, gitBackend(args), GitFlow::modelFor(gitModel(args)),
+                            CancelToken{});
+        if (rv.verdict.isEmpty()) {
+            err() << "review unavailable (could not parse the model response)\n";
+            err().flush();
+            return 1;
+        }
+
+        QString report = "Verdict: " + rv.verdict.toUpper();
+        if (!rv.summary.isEmpty()) report += " — " + rv.summary;
+        report += "\n";
+        if (rv.findings.isEmpty())
+            report += "\nNo blocking findings.\n";
+        else {
+            report += "\nFindings:\n";
+            for (const QString& f : rv.findings) report += "  - " + f + "\n";
+        }
+        out() << "\n" << report;
+        out().flush();
+
+        if (hasFlag(args, "--comment")) {
+            // `gh pr comment -F -` reads the body from stdin — same reason as create.
+            QProcess c;
+            c.setProgram("gh");
+            c.setArguments({"pr", "comment", n, "--body-file", "-"});
+            c.setWorkingDirectory(Tools::threadRoot());
+            c.setProcessChannelMode(QProcess::MergedChannels);
+            c.start();
+            if (!c.waitForStarted(10000)) {
+                err() << "could not run gh\n";
+                err().flush();
+                return 1;
+            }
+            c.write(report.toUtf8());
+            c.closeWriteChannel();
+            c.waitForFinished(120000);
+            out() << QString::fromUtf8(c.readAll());
+            out().flush();
+            return c.exitCode();
+        }
+        return 0;
+    }
+
+    err() << "usage: ollamadev pr create [--base <branch>] | ollamadev pr review <n> [--comment]\n";
+    err().flush();
+    return 1;
+}
+
+int cmdGit(const QStringList& args) {
+    // An allowlist, not a passthrough: `ollamadev git` is a convenience over the
+    // porcelain, and forwarding arbitrary subcommands would quietly make every
+    // destructive one (reset --hard, clean -fdx) reachable through the agent's CLI.
+    static const QStringList allowed{"status", "diff",   "log",  "branch", "checkout", "commit",
+                                     "add",    "push",   "pull", "stash",  "show"};
+    const QString sub = args.value(0);
+    if (sub.isEmpty() || !allowed.contains(sub)) {
+        err() << "usage: ollamadev git <" << allowed.join('|') << ">\n";
+        err().flush();
+        return 1;
+    }
+    if (!GitFlow::isRepo()) {
+        err() << "not a git repository\n";
+        err().flush();
+        return 1;
+    }
+    const GitResult r = GitFlow::git(QStringList{"--no-pager"} + args);
+    out() << r.output;
+    out().flush();
+    return r.exit;
+}
+
+// Detect once, and say so — a wrong guess should be visible and fixable with
+// `test.command`, not silently run.
+std::optional<TestCommand> detectTests() {
+    const auto t = Verify::detect(QDir::currentPath());
+    if (!t) {
+        err() << "could not detect a test command.\n"
+                 "Set one explicitly:  ollamadev config set test.command \"<cmd>\"\n";
+        err().flush();
+    }
+    return t;
+}
+
+int cmdTest(const QStringList&) {
+    const auto t = detectTests();
+    if (!t) return 1;
+
+    out() << "\033[2m[" << t->label << "] " << t->cmd << "\033[0m\n";
+    out().flush();
+    const TestRun r = Verify::run(*t,
+                                  [](const QString& chunk) {
+                                      out() << chunk;
+                                      out().flush();
+                                  },
+                                  CancelToken{});
+    out() << (r.green() ? "\n\033[32m✓ tests pass\033[0m\n" : "\n\033[31m✗ tests failed\033[0m\n");
+    out().flush();
+    return r.exit;
+}
+
+int cmdVerify(const QStringList& args) {
+    const auto t = detectTests();
+    if (!t) return 1;
+
+    const int max = flagValue(args, "--max", "3").toInt();
+    const QString backend = gitBackend(args);
+    const QString model = gitModel(args);
+
+    // The fix agent edits files, so it gets the project as its root. Explicitly, not
+    // by falling back to the process cwd — that is what confines its writes.
+    Tools::setThreadRoot(QDir::currentPath());
+
+    out() << "\033[2m[" << t->label << "] " << t->cmd << "  (up to " << max
+          << " fix attempt(s))\033[0m\n";
+    out().flush();
+
+    VerifyEvents ev;
+    ev.onOutput = [](const QString& chunk) {
+        out() << chunk;
+        out().flush();
+    };
+    ev.onAttempt = [max](int attempt, int, bool green) {
+        if (green)
+            out() << "\n\033[32m✓ tests pass\033[0m"
+                  << (attempt > 1 ? QStringLiteral(" after %1 fix attempt(s)").arg(attempt - 1)
+                                  : QString())
+                  << "\n";
+        else
+            out() << "\n\033[33m✗ attempt " << attempt << "/" << max << ": failing\033[0m\n";
+        out().flush();
+    };
+    ev.onFixStart = [] {
+        out() << "\033[2m  asking the agent to fix…\033[0m ";
+        out().flush();
+    };
+    ev.onFixStep = [] {
+        out() << "\033[2m·\033[0m";
+        out().flush();
+    };
+
+    const int code = Verify::fixLoop(*t, max, backend, model, ev, CancelToken{});
+    if (code != 0) {
+        err() << "\n\033[33mStill failing after " << max
+              << " attempt(s).\033[0m Review the changes before committing.\n";
+        err().flush();
+    }
+    return code;
+}
+
+// ---------------------------------------------------------------- terminal
+
+int cmdTerminal(const QStringList& args) {
+    const QString sub = args.value(0);
+
+    // The host is not a user-facing verb: it is what `terminal start` re-executes
+    // this binary as, and it blocks forever owning the pty. Kept as a subcommand so
+    // the host is OUR OWN binary (applicationFilePath), never a PATH lookup.
+    if (sub == "__host__") return Terminals::hostMain(args.value(1));
+
+    QString e;
+
+    if (sub == "create" || sub == "spawn") {
+        const QString id = args.value(1);
+        if (id.isEmpty()) {
+            err() << "usage: ollamadev terminal " << sub
+                  << " <name>" << (sub == "spawn" ? " <command…>" : "") << " [--cwd <dir>]\n";
+            err().flush();
+            return 2;
+        }
+        const QString cwd = flagValue(args, "--cwd", QDir::currentPath());
+        const QString model = flagValue(args, "--model", flagValue(args, "-m"));
+
+        // Everything after the name that is not a flag or a flag's value is the
+        // command to run (spawn only).
+        QStringList command;
+        if (sub == "spawn") {
+            static const QStringList takesValue{"--cwd", "--model", "-m"};
+            for (int i = 2; i < args.size(); ++i) {
+                if (args.at(i).startsWith('-')) {
+                    if (takesValue.contains(args.at(i))) ++i;
+                    continue;
+                }
+                command << args.at(i);
+            }
+            if (command.isEmpty()) {
+                err() << "usage: ollamadev terminal spawn <name> <command…>\n";
+                err().flush();
+                return 2;
+            }
+        }
+
+        const TerminalInfo t = Terminals::spawn(id, command, cwd, model, &e);
+        if (t.isNull()) {
+            err() << "✗ " << e << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ " << t.id << " running (host pid " << t.hostPid << ", shell pid " << t.shellPid
+              << ")\n"
+              << "  attach: ollamadev terminal attach " << t.id << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub.isEmpty() || sub == "list" || sub == "ls") {
+        const auto all = Terminals::list();
+        if (all.isEmpty()) {
+            out() << "no terminals — create one: ollamadev terminal create <name>\n";
+            out().flush();
+            return 0;
+        }
+        for (const TerminalInfo& t : all) {
+            out() << "  " << (t.running ? "●" : "○") << " " << t.id.leftJustified(16) << "  "
+                  << (t.running ? QStringLiteral("running  pid %1").arg(t.hostPid)
+                                : QStringLiteral("stopped        "))
+                  << "  " << t.cwd << "\n";
+        }
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "start" || sub == "stop" || sub == "delete" || sub == "rm") {
+        const QString id = args.value(1);
+        if (id.isEmpty()) {
+            err() << "usage: ollamadev terminal " << sub << " <name>\n";
+            err().flush();
+            return 2;
+        }
+        const bool ok = sub == "start"  ? Terminals::start(id, &e)
+                        : sub == "stop" ? Terminals::stop(id, &e)
+                                        : Terminals::remove(id, &e);
+        if (!ok) {
+            err() << "✗ " << e << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ " << sub << " " << id << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "log") {
+        const QString id = args.value(1);
+        if (id.isEmpty() || !Terminals::exists(id)) {
+            err() << "usage: ollamadev terminal log <name> [-n <lines>]\n";
+            err().flush();
+            return 2;
+        }
+        const int n = flagValue(args, "-n", "100").toInt();
+        out() << Terminals::log(id, n > 0 ? n : 100) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "attach") {
+        const int code = Terminals::attach(args.value(1), &e);
+        if (!e.isEmpty()) {
+            err() << "✗ " << e << "\n";
+            err().flush();
+            return 1;
+        }
+        return code;
+    }
+
+    if (sub == "broadcast" || sub == "send") {
+        // `send <id> <text>` types into one terminal; `broadcast <text>` into all.
+        const bool one = sub == "send";
+        const QString id = one ? args.value(1) : QString();
+        const QString text = args.mid(one ? 2 : 1).join(' ');
+        if (text.isEmpty() || (one && id.isEmpty())) {
+            err() << "usage: ollamadev terminal " << sub << (one ? " <name>" : "") << " \"<text>\"\n";
+            err().flush();
+            return 2;
+        }
+        const QByteArray keys = text.toUtf8() + '\n';  // a typed line ends in Return
+        if (one) {
+            if (!Terminals::send(id, keys, &e)) {
+                err() << "✗ " << e << "\n";
+                err().flush();
+                return 1;
+            }
+            out() << "✓ sent to " << id << "\n";
+            out().flush();
+            return 0;
+        }
+        const int n = Terminals::broadcast(keys);
+        out() << "✓ sent to " << n << " terminal(s)\n";
+        out().flush();
+        return n > 0 ? 0 : 1;
+    }
+
+    err() << "usage: ollamadev terminal [create|spawn|list|start|stop|attach|send|broadcast|"
+             "delete|log] <name>\n";
+    err().flush();
+    return 2;
+}
+
+// -------------------------------------------------------------------- watch
+
+int cmdWatch(const QStringList& args) {
+    WatchOptions o;
+    o.intervalSec = flagValue(args, "--interval", "2").toInt();
+    o.once = hasFlag(args, "--once");
+    o.iterations = Config::integer("watch.iterations", 8);
+    o.backend = flagValue(args, "--backend");
+    o.model = flagValue(args, "--model", flagValue(args, "-m"));
+
+    // The task is the first positional; the rest are paths to watch. --interval
+    // takes a value, so its number must not be mistaken for either.
+    static const QStringList takesValue{"--interval", "--backend", "--model", "-m"};
+    QStringList words;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args.at(i).startsWith('-')) {
+            if (takesValue.contains(args.at(i))) ++i;
+            continue;
+        }
+        words << args.at(i);
+    }
+    o.task = words.value(0);
+    o.paths = words.mid(1);
+    return Watch::run(o);
+}
+
+// -------------------------------------------------------------------- hooks
+
+int cmdHooks(const QStringList& args) {
+    out() << Hooks::editorCommand(args);
+    out().flush();
+    return 0;
+}
+
+// User-defined slash commands: `ollamadev commands` lists them, `/<name> [args]`
+// expands the template and runs it as a one-shot.
+int cmdCommands(const QStringList& args) {
+    const QString sub = args.value(0);
+    if (sub == "show") {
+        const QString body = UserCmds::expand(args.value(1), args.mid(2).join(' '));
+        if (body.isEmpty()) {
+            err() << "no custom command '" << args.value(1) << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << body << "\n";
+        out().flush();
+        return 0;
+    }
+    out() << UserCmds::render();
+    out().flush();
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -994,6 +1620,26 @@ int main(int argc, char** argv) {
     if (cmd == "scan") return cmdScan(rest);
     if (cmd == "voice") return cmdVoice(rest);
     if (cmd == "transcribe") return cmdTranscribe(rest);
+
+    if (cmd == "terminal") return cmdTerminal(rest);
+    if (cmd == "watch") return cmdWatch(rest);
+    if (cmd == "hooks") return cmdHooks(rest);
+    if (cmd == "commands") return cmdCommands(rest);
+
+    // A user-defined slash command typed at the shell: `ollamadev /review src/x.c`
+    // expands ~/.ollamadev/commands/review.md and runs it as a one-shot.
+    if (cmd.startsWith('/') && UserCmds::exists(cmd.mid(1))) {
+        const QString prompt = UserCmds::expand(cmd.mid(1), rest.join(' '));
+        if (!prompt.isEmpty()) return cmdOneShot(prompt, args);
+    }
+
+    if (cmd == "diff") return cmdDiff(rest);
+    if (cmd == "commit") return cmdCommit(rest);
+    if (cmd == "ship") return cmdShip(rest);
+    if (cmd == "pr") return cmdPr(rest);
+    if (cmd == "git") return cmdGit(rest);
+    if (cmd == "test") return cmdTest(rest);
+    if (cmd == "verify") return cmdVerify(rest);
 
     if (cmd == "models") {
         const QString id = flagValue(args, "--backend", Config::str("model.backend", "ollama"));

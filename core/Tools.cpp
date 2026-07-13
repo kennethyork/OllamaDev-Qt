@@ -19,6 +19,7 @@
 
 #include "CodeIndex.h"
 #include "Config.h"
+#include "Hooks.h"
 #include "Mcp.h"
 #include "Memory.h"
 #include "Skills.h"
@@ -1563,7 +1564,17 @@ ToolResult Tools::run(const QString& name, const QJsonObject& args) {
         return fail(QStringLiteral("permission denied for tool '%1' (mode: %2)")
                         .arg(name, Permission::modeName(Permission::mode())));
     if (!t->fn) return fail(QStringLiteral("tool '%1' has no implementation").arg(name));
-    return t->fn(args);
+
+    // PreToolUse hooks are a GATE: a non-zero exit blocks the tool and its output
+    // becomes the reason the model is told. It fails CLOSED — a hook that cannot be
+    // spawned blocks too (see Hooks.h). No hooks configured => no work done here.
+    QString blocked;
+    if (Hooks::preToolUse(name, args, &blocked))
+        return fail(QStringLiteral("blocked by a PreToolUse hook: %1").arg(blocked));
+
+    const ToolResult r = t->fn(args);
+    Hooks::postToolUse(name, args, r.ok ? r.output : r.error);
+    return r;
 }
 
 }  // namespace odv

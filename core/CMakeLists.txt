@@ -22,6 +22,13 @@ add_library(odv-core STATIC
     WebSearch.cpp WebSearch.h
     Stt.cpp Stt.h
     Tui.cpp Tui.h
+    Lsp.cpp Lsp.h
+    Eval.cpp Eval.h
+    Watch.cpp Watch.h
+    Terminals.cpp Terminals.h
+    Hooks.cpp Hooks.h
+    GitFlow.cpp GitFlow.h
+    Verify.cpp Verify.h
 )
 
 target_include_directories(odv-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
