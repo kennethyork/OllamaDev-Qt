@@ -15,6 +15,7 @@
 // The CMake option ODV_WEBENGINE (default ON) finds QtWebEngine and defines the
 // macro; install qt6-webengine-dev to switch a fallback build to the full engine.
 #if defined(ODV_HAS_WEBENGINE)
+#include <QWebEngineHistory>
 #include <QWebEngineView>
 #else
 #include <QNetworkAccessManager>
