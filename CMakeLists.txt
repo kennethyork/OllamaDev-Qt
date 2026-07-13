@@ -10,11 +10,25 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Network Concurrent Widgets)
-qt_standard_project_setup()
-
 # The CLI must build without a GUI toolchain — headless boxes and CI want it alone.
 option(ODV_BUILD_ADE "Build the Qt desktop app" ON)
+
+# Widgets is only a dependency of the desktop app. Requiring it unconditionally
+# made the CLI-only build fail on machines that have Qt Core but no GUI packages,
+# which is exactly the configuration ODV_BUILD_ADE=OFF exists to serve.
+set(ODV_QT_COMPONENTS Core Network Concurrent)
+if(ODV_BUILD_ADE)
+    list(APPEND ODV_QT_COMPONENTS Widgets)
+endif()
+find_package(Qt6 6.2 REQUIRED COMPONENTS ${ODV_QT_COMPONENTS})
+
+# qt_standard_project_setup() arrived in Qt 6.3, but our glibc floor is Ubuntu
+# 22.04, which ships Qt 6.2. Everything it would set for us (AUTOMOC, C++ standard)
+# is already set above, so it is a nicety, not a requirement — take it when the
+# toolchain is new enough and carry on when it is not.
+if(COMMAND qt_standard_project_setup)
+    qt_standard_project_setup()
+endif()
 
 add_subdirectory(core)
 add_subdirectory(cli)
@@ -55,7 +69,24 @@ set(CPACK_PACKAGE_INSTALL_DIRECTORY "ollamadev")
 set(CPACK_STRIP_FILES ON)
 
 if(UNIX AND NOT APPLE)
-    set(CPACK_GENERATOR "TGZ;DEB")
+    set(CPACK_GENERATOR "TGZ;DEB;RPM")
+
+    # RPM: let rpmbuild derive the Qt/libc requires from the ELF files, for the
+    # same reason DEB uses shlibdeps — a hand-written Requires: list goes stale
+    # the first time Qt bumps a soname, and the package then installs and fails
+    # to start.
+    set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
+    set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
+    set(CPACK_RPM_PACKAGE_AUTOREQ ON)
+    set(CPACK_RPM_PACKAGE_SUGGESTS "alsa-utils")
+    # CPack would otherwise claim ownership of /usr/share/applications and
+    # /usr/share/icons, which collides with filesystem-owned dirs on rpm distros.
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+        /usr/share/applications
+        /usr/share/icons
+        /usr/share/icons/hicolor
+        /usr/share/icons/hicolor/scalable
+        /usr/share/icons/hicolor/scalable/apps)
 
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "OllamaDev <noreply@ollamadev.local>")
     set(CPACK_DEBIAN_PACKAGE_SECTION "devel")

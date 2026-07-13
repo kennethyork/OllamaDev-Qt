@@ -119,10 +119,11 @@ jobs:
 
       - name: Build artifacts
         run: |
+          sudo apt-get install -y --no-install-recommends rpm
           scripts/build-appimage.sh
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
-          (cd build && cpack -G "TGZ;DEB")
+          (cd build && cpack -G "TGZ;DEB;RPM")
 
       - name: Publish
         env:
@@ -137,4 +138,5 @@ jobs:
             --notes-file RELEASE_NOTES.md \
             dist/OllamaDev-x86_64.AppImage \
             build/ollamadev-*.tar.gz \
-            build/ollamadev-*.deb
+            build/ollamadev-*.deb \
+            build/ollamadev-*.rpm
