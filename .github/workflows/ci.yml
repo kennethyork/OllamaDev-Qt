@@ -5,6 +5,14 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  # Run a full release on demand from the Actions tab — no tag needed. Give it a
+  # version like v0.2.1; the run builds every artifact and publishes that release.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release version to publish (e.g. v0.2.1)'
+        required: true
+        type: string
 
 jobs:
   build:
@@ -100,9 +108,9 @@ jobs:
           path: dist/OllamaDev-x86_64.AppImage
 
   release:
-    # Only on a tag, and only once everything above is green — a release artifact
-    # that never passed the suite is worse than no release artifact.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Runs on a tag push OR a manual dispatch — and only once every job above is
+    # green, so a release artifact that never passed the suite is impossible.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [build, cli-only, appimage]
     runs-on: ubuntu-22.04
     permissions:
@@ -132,8 +140,17 @@ jobs:
           # Built on ubuntu-22.04 so the glibc floor is 2.35. Building this on
           # ubuntu-latest would silently raise the floor and the AppImage would
           # refuse to start on Mint 21 — with no warning until a user reports it.
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "OllamaDev-Qt ${GITHUB_REF_NAME}" \
+          #
+          # TAG comes from the pushed tag, or the dispatch input on a manual run.
+          TAG="${{ github.event.inputs.tag }}"
+          [ -z "$TAG" ] && TAG="${GITHUB_REF_NAME}"
+          # A manual dispatch has no tag object yet — point one at this commit so
+          # the release has something to hang on, and re-publish (clobber) if the
+          # release already exists.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          git tag -f "$TAG" && git push -f origin "$TAG"
+          gh release create "$TAG" \
+            --title "OllamaDev-Qt $TAG" \
             --latest \
             --notes-file RELEASE_NOTES.md \
             dist/OllamaDev-x86_64.AppImage \
