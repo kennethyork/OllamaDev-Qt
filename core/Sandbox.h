@@ -28,8 +28,34 @@ public:
     // Directories never copied into a sandbox nor compared.
     static QStringList excludes();
 
+    // Make a coder's sandbox at `dest`, and take it away again.
+    //
+    // A GIT WORKTREE when the project is a git repo, a full folder copy when it is
+    // not. The worktree is the better deal on every axis that matters:
+    //   * it SHARES THE OBJECT STORE, so N coders cost N working trees rather than
+    //     N working trees plus N copies of .git (on this repo that is 143MB of
+    //     history, per coder, copied for nothing);
+    //   * the sandbox is a REAL GIT REPO, so a coder can actually run git_diff /
+    //     git_log / git_status. Under the old folder copy .git was excluded, which
+    //     meant the seventeen git_* tools were dead inside a crew coder — they
+    //     answered "not a git repository" and the coder had no way to see history;
+    //   * gitignored junk (build/, dist/) is simply absent, instead of being copied
+    //     into every sandbox and then having to be excluded from the capture.
+    //
+    // THE SUBTLETY, and the reason this is not a two-line change: `git worktree add`
+    // checks out a COMMIT, but the coder must start from the user's WORKING TREE.
+    // Anything uncommitted would otherwise be invisible to the coder — and worse,
+    // capture() would compare the sandbox against the project, see the user's own
+    // uncommitted edits, and record them as changes the CODER had reverted. So the
+    // dirty state (modified, added, deleted, untracked) is replicated into the
+    // worktree afterwards. The coder ends up looking at exactly what the user sees,
+    // which is what the folder copy did, and what capture() assumes.
+    static bool create(const QString& projectRoot, const QString& dest, QString* err = nullptr);
+    static bool destroy(const QString& projectRoot, const QString& dest);
+
     // Full recursive copy. Parallelised across files — this is pure I/O and was
-    // one of the serial bottlenecks in the PHP version.
+    // one of the serial bottlenecks in the PHP version. Still used verbatim for a
+    // project that is not under git.
     static bool copyTree(const QString& src, const QString& dst, QString* err = nullptr);
     static bool removeTree(const QString& dir);
 

@@ -521,7 +521,10 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 }
                 if (subs[i].state == "held") return {};  // resume: leave it on the board
                 QString err;
-                Sandbox::copyTree(projectRoot, sandboxes[i], &err);
+                // A git worktree when the project is under git (shared object store,
+                // and the coder gets a REAL repo it can run git_diff/git_log in), a
+                // folder copy when it is not. See Sandbox::create.
+                Sandbox::create(projectRoot, sandboxes[i], &err);
                 CrewSkills::materialize(starters, sandboxes[i]);
                 return QJsonObject{{"err", err}};
             });
@@ -910,7 +913,10 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
     out.results = results;
     publishBoard(runId, task, subs, false);
-    for (const auto& sb : sandboxes) Sandbox::removeTree(sb);
+    // destroy(), not removeTree(): a worktree has to be unregistered from the
+    // project's .git as well as deleted, or its admin entry lingers and the path
+    // cannot be reused by the next run.
+    for (const auto& sb : sandboxes) Sandbox::destroy(projectRoot, sb);
     // ---- Learn (opt-in) ---------------------------------------------------
     // Distil what this run taught into durable memory, and — when the run
     // produced something with a reusable shape — a skill. Next run loads both.

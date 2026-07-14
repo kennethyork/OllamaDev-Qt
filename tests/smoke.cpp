@@ -1158,6 +1158,119 @@ static void testRebase() {
     Tools::setThreadRoot(QString());
 }
 
+// A crew sandbox is a git WORKTREE when the project is under git.
+//
+// The whole reason this is not a two-line change: `git worktree add` checks out a
+// COMMIT, but a coder must start from the user's WORKING TREE. Anything
+// uncommitted would otherwise be invisible to it — and, far worse, capture() would
+// compare the sandbox against the project, see the user's own uncommitted edits,
+// and record them as changes the CODER had reverted. Landing that changeset would
+// then silently undo the user's work. Every check below exists for that.
+static void testWorktreeSandbox() {
+    QTemporaryDir proj, sb;
+    if (!proj.isValid()) {
+        check(false, "temp dirs for the worktree test");
+        return;
+    }
+    const QString root = proj.path();
+
+    auto git = [&](const QStringList& a) {
+        QProcess p;
+        p.setWorkingDirectory(root);
+        p.start(QStringLiteral("git"), a);
+        return p.waitForFinished(15000) && p.exitCode() == 0;
+    };
+    if (!git({QStringLiteral("init"), QStringLiteral("-q"), QStringLiteral("-b"),
+              QStringLiteral("main")})) {
+        check(true, "git is not installed — skipping the worktree tests");
+        return;
+    }
+    git({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@t.t")});
+    git({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("t")});
+
+    const auto put = [](const QString& p, const char* text) {
+        QDir().mkpath(QFileInfo(p).absolutePath());
+        QFile f(p);
+        f.open(QIODevice::WriteOnly);
+        f.write(text);
+        f.close();
+    };
+    const auto slurp = [](const QString& p) {
+        QFile f(p);
+        if (!f.open(QIODevice::ReadOnly)) return QString();
+        return QString::fromUtf8(f.readAll());
+    };
+
+    put(root + "/committed.txt", "committed\n");
+    put(root + "/deleteme.txt", "doomed\n");
+    put(root + "/.gitignore", "ignored/\n");
+    git({QStringLiteral("add"), QStringLiteral("-A")});
+    git({QStringLiteral("commit"), QStringLiteral("-qm"), QStringLiteral("seed")});
+
+    // Now make the project DIRTY, exactly as a real user's would be.
+    put(root + "/committed.txt", "committed\nEDITED BUT NOT COMMITTED\n");  // modified
+    put(root + "/untracked.txt", "brand new, never committed\n");            // untracked
+    QFile::remove(root + "/deleteme.txt");                                    // deleted
+    put(root + "/ignored/junk.o", "build output\n");                          // gitignored
+
+    const QString box = sb.path() + QStringLiteral("/c1");
+    QString err;
+    check(Sandbox::create(root, box, &err), "create() makes a sandbox from a git project");
+    check(QFileInfo(box + QStringLiteral("/.git")).isFile(),
+          "…and it is a WORKTREE (a .git FILE), not a folder copy");
+
+    // THE BUG THIS GUARDS. If the sandbox were left at HEAD, the coder would not see
+    // the user's uncommitted work, and capture() would read it back as a deletion.
+    check(slurp(box + QStringLiteral("/committed.txt")).contains(QStringLiteral("EDITED")),
+          "the user's UNCOMMITTED edit is in the sandbox (worktree alone would miss it)");
+    check(QFileInfo::exists(box + QStringLiteral("/untracked.txt")),
+          "…and their untracked file is too");
+    check(!QFileInfo::exists(box + QStringLiteral("/deleteme.txt")),
+          "…and a file they deleted is really gone, not resurrected from HEAD");
+    check(!QFileInfo::exists(box + QStringLiteral("/ignored/junk.o")),
+          "gitignored build junk is absent — the folder copy used to drag it in");
+
+    // The point of the whole migration: a coder can now actually use git.
+    QProcess p;
+    p.setWorkingDirectory(box);
+    p.start(QStringLiteral("git"), {QStringLiteral("log"), QStringLiteral("--oneline")});
+    p.waitForFinished(10000);
+    check(p.exitCode() == 0 && QString::fromUtf8(p.readAllStandardOutput()).contains("seed"),
+          "the coder can run git IN its sandbox — the 17 git_* tools were dead before this");
+
+    // capture() must see nothing: an untouched sandbox is not a changeset. If the
+    // dirty-state replay were wrong, this is where it would show up as phantom edits.
+    QTemporaryDir store;
+    const Changeset none = Sandbox::capture(root, box, store.path());
+    check(none.empty(), "an untouched worktree sandbox captures NOTHING (no phantom changes)");
+
+    // And a real coder edit is still captured.
+    put(box + QStringLiteral("/committed.txt"), "committed\nEDITED BUT NOT COMMITTED\nCODER\n");
+    QTemporaryDir store2;
+    const Changeset cs = Sandbox::capture(root, box, store2.path());
+    check(cs.modified.contains(QStringLiteral("committed.txt")),
+          "…but a change the coder actually made IS captured");
+
+    check(Sandbox::destroy(root, box), "destroy() removes the worktree");
+    check(!QFileInfo::exists(box), "…and the directory is gone");
+    QProcess wl;
+    wl.setWorkingDirectory(root);
+    wl.start(QStringLiteral("git"), {QStringLiteral("worktree"), QStringLiteral("list")});
+    wl.waitForFinished(10000);
+    check(!QString::fromUtf8(wl.readAllStandardOutput()).contains(QStringLiteral("/c1")),
+          "…and it is unregistered from .git, so the path can be reused");
+
+    // A project with no git at all must still work — that is what copyTree is for.
+    QTemporaryDir plain, box2;
+    put(plain.path() + QStringLiteral("/a.txt"), "hello\n");
+    check(Sandbox::create(plain.path(), box2.path() + QStringLiteral("/c1"), &err),
+          "a NON-git project still gets a sandbox (folder copy)");
+    check(QFileInfo::exists(box2.path() + QStringLiteral("/c1/a.txt")),
+          "…with its files in it");
+    check(!QFileInfo(box2.path() + QStringLiteral("/c1/.git")).exists(),
+          "…and no worktree, because there is no repo to make one from");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -1183,6 +1296,7 @@ int main(int argc, char** argv) {
     s << "lsp\n";        s.flush(); testLsp();
     s << "git-graph\n";  s.flush(); testGitGraph();
     s << "rebase\n";     s.flush(); testRebase();
+    s << "worktree\n";   s.flush(); testWorktreeSandbox();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

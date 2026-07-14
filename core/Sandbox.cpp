@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMutex>
+#include <QProcess>
 #include <QMutexLocker>
 #include <QSet>
 #include <QVector>
@@ -215,6 +216,172 @@ QHash<QString, QString> Sandbox::listFiles(const QString& root) {
     return out;
 }
 
+// ---- worktree sandboxes -----------------------------------------------------
+
+namespace {
+
+// git, in a given directory, with an argv ARRAY. Not GitFlow::git: that one runs
+// in Tools::threadRoot(), which for a crew coder is its own sandbox — the very
+// thing we are trying to create. This has to run in the PROJECT.
+struct GitOut {
+    int exit = -1;
+    QString text;
+    bool ok() const { return exit == 0; }
+};
+
+GitOut gitIn(const QString& dir, const QStringList& args) {
+    GitOut r;
+    QProcess p;
+    p.setProgram(QStringLiteral("git"));
+    p.setArguments(args);
+    p.setWorkingDirectory(dir);
+    p.setProcessChannelMode(QProcess::MergedChannels);
+    p.start();
+    if (!p.waitForStarted(10000)) return r;
+    if (!p.waitForFinished(120000)) {
+        p.kill();  // our own child, by handle
+        p.waitForFinished(2000);
+        return r;
+    }
+    r.exit = p.exitCode();
+    r.text = QString::fromUtf8(p.readAll());
+    return r;
+}
+
+bool isGitRepo(const QString& dir) {
+    const GitOut r = gitIn(dir, {QStringLiteral("rev-parse"), QStringLiteral("--is-inside-work-tree")});
+    if (!r.ok() || r.text.trimmed() != QLatin1String("true")) return false;
+    // A repo with no commits has no HEAD to check a worktree out of.
+    return gitIn(dir, {QStringLiteral("rev-parse"), QStringLiteral("--verify"),
+                       QStringLiteral("HEAD")})
+        .ok();
+}
+
+// `git worktree add` writes into the shared .git. Git takes its own lock, but N
+// coders racing to create N worktrees at once is not a thing worth finding out
+// about in production — and creation is fast, so the serialisation costs nothing.
+QMutex& worktreeMutex() {
+    static QMutex m;
+    return m;
+}
+
+// Copy ONE file, making its parent. Used to replay the project's dirty state into
+// a fresh worktree.
+bool copyOne(const QString& from, const QString& to) {
+    QDir().mkpath(QFileInfo(to).absolutePath());
+    QFile::remove(to);
+    return QFile::copy(from, to);
+}
+
+// Everything git ignores in this project, as it reports it: files, and directories
+// with a trailing slash (`--directory` collapses an ignored folder to one entry
+// rather than listing ten thousand object files inside it).
+QSet<QString> gitIgnoredPaths(const QString& root) {
+    QSet<QString> out;
+    const GitOut r = gitIn(root, {QStringLiteral("ls-files"), QStringLiteral("--others"),
+                                  QStringLiteral("--ignored"), QStringLiteral("--exclude-standard"),
+                                  QStringLiteral("--directory")});
+    if (!r.ok()) return out;  // not a git project: nothing is ignored
+    for (const QString& line : r.text.split(QLatin1Char('\n'), Qt::SkipEmptyParts))
+        out.insert(line.trimmed());
+    return out;
+}
+
+// Is `rel` ignored, either directly or because it lives under an ignored directory?
+bool isIgnored(const QString& rel, const QSet<QString>& ignored) {
+    if (ignored.isEmpty()) return false;
+    if (ignored.contains(rel)) return true;
+    for (const QString& ig : ignored) {
+        if (!ig.endsWith(QLatin1Char('/'))) continue;
+        if (rel.startsWith(ig)) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool Sandbox::create(const QString& projectRoot, const QString& dest, QString* err) {
+    const QString root = QDir(projectRoot).absolutePath();
+    const QString to = QDir(dest).absolutePath();
+
+    // Not a git project (or an empty one): the folder copy is still the only way.
+    if (!isGitRepo(root)) return copyTree(root, to, err);
+
+    QDir().mkpath(QFileInfo(to).absolutePath());
+    {
+        QMutexLocker lock(&worktreeMutex());
+        // --detach: no branch. A branch per coder would litter the user's repo with
+        // refs they never asked for, and we land changesets by copying files, not by
+        // merging refs — so the branch would be pure noise.
+        // --force: `dest` may be a stale worktree path from a killed run.
+        const GitOut r = gitIn(root, {QStringLiteral("worktree"), QStringLiteral("add"),
+                                      QStringLiteral("--detach"), QStringLiteral("--force"), to,
+                                      QStringLiteral("HEAD")});
+        if (!r.ok()) {
+            // Never leave the user without a sandbox because git had an opinion.
+            if (err) *err = r.text.trimmed();
+            return copyTree(root, to, err);
+        }
+    }
+
+    // THE IMPORTANT HALF. The worktree is at HEAD; the user is at HEAD + whatever
+    // they have not committed. Replay that, or the coder cannot see the work the
+    // user is asking it to build on — and capture() would read the user's own
+    // uncommitted edits as changes the coder had reverted.
+    const GitOut st = gitIn(root, {QStringLiteral("status"), QStringLiteral("--porcelain")});
+    if (!st.ok()) return true;  // no dirty state we can read; the worktree is still valid
+
+    const QSet<QString> excl = excludeSet();
+    for (const QString& line : st.text.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        if (line.size() < 4) continue;
+        QString rel = line.mid(3).trimmed();
+        const int arrow = rel.indexOf(QStringLiteral(" -> "));  // "R  old -> new"
+        if (arrow >= 0) rel = rel.mid(arrow + 4);
+        if (rel.isEmpty()) continue;
+        if (rel.startsWith(QLatin1Char('"')) && rel.endsWith(QLatin1Char('"')))
+            rel = rel.mid(1, rel.size() - 2);  // git quotes paths with odd characters
+
+        bool skip = false;
+        for (const QString& part : rel.split(QLatin1Char('/')))
+            if (excl.contains(part)) skip = true;
+        if (skip) continue;
+
+        const QString from = root + QLatin1Char('/') + rel;
+        const QString into = to + QLatin1Char('/') + rel;
+
+        if (!QFileInfo::exists(from)) {
+            // Deleted in the project but present at HEAD: the coder must not see it.
+            QFile::remove(into);
+            continue;
+        }
+        if (QFileInfo(from).isDir()) {
+            // An untracked DIRECTORY is reported as one entry ("?? newdir/").
+            copyTree(from, into, nullptr);
+            continue;
+        }
+        copyOne(from, into);
+    }
+    return true;
+}
+
+bool Sandbox::destroy(const QString& projectRoot, const QString& dest) {
+    const QString to = QDir(dest).absolutePath();
+    // A worktree has a `.git` FILE (pointing at the real one); a copied sandbox has
+    // nothing. That is how we tell which kind we are taking away — cheaper and more
+    // honest than remembering.
+    if (QFileInfo(to + QStringLiteral("/.git")).isFile()) {
+        QMutexLocker lock(&worktreeMutex());
+        const QString root = QDir(projectRoot).absolutePath();
+        gitIn(root, {QStringLiteral("worktree"), QStringLiteral("remove"), QStringLiteral("--force"),
+                     to});
+        // The admin entry survives a hand-deleted directory; prune clears it so the
+        // path can be reused by the next run.
+        gitIn(root, {QStringLiteral("worktree"), QStringLiteral("prune")});
+        return !QFileInfo::exists(to) || removeTree(to);
+    }
+    return removeTree(to);
+}
+
 bool Sandbox::copyTree(const QString& src, const QString& dst, QString* err) {
     const QString from = QDir(src).absolutePath();
     const QString to = QDir(dst).absolutePath();
@@ -287,13 +454,28 @@ Changeset Sandbox::capture(const QString& projectRoot, const QString& sandbox,
     removeTree(storeDir);
     QDir().mkpath(storeDir + QStringLiteral("/files"));
 
+    // Files git ignores in the PROJECT (build/, dist/, *.o …).
+    //
+    // A worktree sandbox does not contain them — that is one of the reasons to use
+    // one. But capture() computes deletions as "in the project, absent from the
+    // sandbox", so without this every gitignored file would be recorded as a file
+    // the CODER DELETED. Landing that changeset would then wipe the user's build
+    // directory, and it would look like the model did it on purpose.
+    //
+    // Empty for a non-git project, where nothing is ignored and the folder copy
+    // brought everything across anyway.
+    const QSet<QString> ignored = gitIgnoredPaths(root);
+
     // Deterministic order in manifest + diff: the crew's output feeds an
     // auditor model and a human reviewer, both of whom deserve stable output.
     QStringList sandRels = sand.keys();
     std::sort(sandRels.begin(), sandRels.end());
     QStringList delRels;
-    for (auto it = proj.constBegin(); it != proj.constEnd(); ++it)
-        if (!sand.contains(it.key())) delRels.append(it.key());
+    for (auto it = proj.constBegin(); it != proj.constEnd(); ++it) {
+        if (sand.contains(it.key())) continue;
+        if (isIgnored(it.key(), ignored)) continue;  // never in the sandbox to begin with
+        delRels.append(it.key());
+    }
     std::sort(delRels.begin(), delRels.end());
 
     enum Status { Unchanged, Created, Modified, Deleted };
