@@ -22,6 +22,7 @@
 
 #include "../ade/GitGraph.h"
 #include "Backend.h"
+#include "GitFlow.h"
 #include "Config.h"
 #include "Hooks.h"
 #include "Json.h"
