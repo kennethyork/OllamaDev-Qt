@@ -7,6 +7,7 @@
 #include <QThread>
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QProcess>
 
 #include "Backend.h"
@@ -777,6 +778,78 @@ static void testUpdateSafety() {
     check(!Update::install(empty, &err), "install refuses when there is nothing to install");
 }
 
+// ACP: JSON-RPC over stdio, the protocol an editor drives us with. The handshake
+// and session creation touch no model, so they are testable for real — we spawn
+// the actual binary and speak the actual protocol to it.
+static void testAcp() {
+    const QString cli = QCoreApplication::applicationDirPath() + QStringLiteral("/../cli/ollamadev");
+    if (!QFileInfo(cli).isExecutable()) {
+        check(true, "ollamadev binary not built here — skipping the ACP protocol test");
+        return;
+    }
+
+    QProcess p;
+    p.start(cli, {QStringLiteral("acp")});
+    if (!p.waitForStarted(5000)) {
+        check(false, "the acp server starts");
+        return;
+    }
+
+    const auto rpc = [&p](const QByteArray& line) -> QJsonObject {
+        p.write(line + "\n");
+        p.waitForBytesWritten(2000);
+        // One frame per line. A server that ever printed anything else on stdout
+        // would desynchronise a real editor's parser, so this is load-bearing.
+        while (p.canReadLine() || p.waitForReadyRead(10000)) {
+            const QByteArray raw = p.readLine().trimmed();
+            if (raw.isEmpty()) continue;
+            return QJsonDocument::fromJson(raw).object();
+        }
+        return {};
+    };
+
+    const QJsonObject init = rpc(
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}})");
+    const QJsonObject res = init.value("result").toObject();
+    check(init.value("id").toInt() == 1 && res.value("protocolVersion").toInt() == 1,
+          "initialize answers with the protocol version");
+    check(res.value("agentInfo").toObject().value("name").toString() == QLatin1String("ollamadev"),
+          "…and says who it is");
+    check(res.value("agentCapabilities")
+              .toObject()
+              .value("promptCapabilities")
+              .toObject()
+              .value("image")
+              .toBool(),
+          "…and advertises image prompts, because Vision works on this path too");
+
+    const QJsonObject made =
+        rpc(R"({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp"}})");
+    check(made.value("result").toObject().value("sessionId").toString().startsWith(
+              QStringLiteral("acp_")),
+          "session/new hands back a session id");
+
+    const QJsonObject bad =
+        rpc(R"({"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"nope","prompt":[]}})");
+    check(bad.contains("error"), "a prompt for an unknown session is a JSON-RPC error, not a crash");
+
+    const QJsonObject huh = rpc(R"({"jsonrpc":"2.0","id":4,"method":"no/such/method"})");
+    check(huh.value("error").toObject().value("code").toInt() == -32601,
+          "an unknown method answers -32601 rather than dying");
+
+    p.closeWriteChannel();  // stdin closed = the editor went away
+    check(p.waitForFinished(5000) && p.exitCode() == 0,
+          "the server exits cleanly when the editor closes the pipe");
+
+    const QString src = readSource(QStringLiteral("core/Acp.cpp"));
+    check(src.contains("class TurnThread"),
+          "a turn runs on a WORKER — a blocked reader could never take session/cancel");
+    check(src.contains("Permission::setAsker"),
+          "every mutating tool becomes a session/request_permission the EDITOR answers");
+    check(src.contains("s.answers.insert") && src.contains("answered.wakeAll"),
+          "the reader routes a permission answer back to the parked worker");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -798,6 +871,7 @@ int main(int argc, char** argv) {
     s << "plugins\n";    s.flush(); testPlugins();
     s << "export\n";     s.flush(); testExportImport();
     s << "update\n";     s.flush(); testUpdateSafety();
+    s << "acp\n";        s.flush(); testAcp();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

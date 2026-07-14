@@ -19,6 +19,7 @@ add_library(odv-core STATIC
     Memory.cpp Memory.h
     Mcp.cpp Mcp.h
     StdioRpc.cpp StdioRpc.h
+    Acp.cpp Acp.h
     Plugins.cpp Plugins.h
     Update.cpp Update.h
     Workspaces.cpp Workspaces.h

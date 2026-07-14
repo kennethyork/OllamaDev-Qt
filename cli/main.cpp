@@ -40,6 +40,7 @@
 #include "Usage.h"
 #include "Verify.h"
 #include "Vision.h"
+#include "Acp.h"
 #include "Plugins.h"
 #include "Update.h"
 #include "Workspaces.h"
@@ -2874,6 +2875,7 @@ int main(int argc, char** argv) {
     if (cmd == "board") return cmdBoard(rest);
     if (cmd == "ws" || cmd == "workspace") return cmdWorkspace(rest);
     if (cmd == "plugin" || cmd == "plugins") return cmdPlugin(rest);
+    if (cmd == "acp") return Acp::serve();
     if (cmd == "update" || cmd == "upgrade") return cmdUpdate(rest);
     if (cmd == "export") return cmdExport(rest);
     if (cmd == "import") return cmdImport(rest);
