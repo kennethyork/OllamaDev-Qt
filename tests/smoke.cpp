@@ -850,6 +850,119 @@ static void testAcp() {
           "the reader routes a permission answer back to the parked worker");
 }
 
+// The LSP server, spoken to the way an editor speaks to it: Content-Length framing
+// over stdio. documentSymbol / references / rename / formatting need no model, so
+// they are testable for real.
+static void testLsp() {
+    const QString cli = QCoreApplication::applicationDirPath() + QStringLiteral("/../cli/ollamadev");
+    if (!QFileInfo(cli).isExecutable()) {
+        check(true, "ollamadev binary not built here — skipping the LSP protocol test");
+        return;
+    }
+    QTemporaryDir proj;
+    const QString path = proj.path() + QStringLiteral("/a.py");
+    const QString text = QStringLiteral("def greet(name):\n    return name\n\nprint(greet('x'))\n");
+    QFile f(path);
+    f.open(QIODevice::WriteOnly);
+    f.write(text.toUtf8());
+    f.close();
+    const QString uri = QStringLiteral("file://") + path;
+
+    QProcess p;
+    p.setWorkingDirectory(proj.path());
+    p.start(cli, {QStringLiteral("lsp")});
+    if (!p.waitForStarted(5000)) {
+        check(false, "the lsp server starts");
+        return;
+    }
+
+    const auto send = [&p](const QJsonObject& o) {
+        const QByteArray body = QJsonDocument(o).toJson(QJsonDocument::Compact);
+        p.write("Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+        p.waitForBytesWritten(2000);
+    };
+    // Content-Length framing: read the header, then exactly that many bytes. Getting
+    // this wrong is the classic LSP bug where the client goes permanently quiet.
+    const auto recv = [&p]() -> QJsonObject {
+        QByteArray hdr;
+        while (!hdr.contains("\r\n\r\n")) {
+            if (!p.waitForReadyRead(10000)) return {};
+            hdr += p.readAll();
+        }
+        const int split = hdr.indexOf("\r\n\r\n") + 4;
+        int len = 0;
+        for (const QByteArray& line : hdr.left(split).split('\n'))
+            if (line.toLower().startsWith("content-length:"))
+                len = line.mid(15).trimmed().toInt();
+        QByteArray body = hdr.mid(split);
+        while (body.size() < len) {
+            if (!p.waitForReadyRead(10000)) break;
+            body += p.readAll();
+        }
+        return QJsonDocument::fromJson(body.left(len)).object();
+    };
+
+    send(QJsonObject{{"jsonrpc", "2.0"},
+                     {"id", 1},
+                     {"method", "initialize"},
+                     {"params", QJsonObject{{"rootUri", QStringLiteral("file://") + proj.path()}}}});
+    const QJsonObject caps =
+        recv().value("result").toObject().value("capabilities").toObject();
+    // The PHP server advertised definitionProvider and never handled
+    // textDocument/definition — so go-to-definition silently did nothing and looked
+    // like a broken EDITOR. Advertise only what is implemented.
+    check(caps.value("definitionProvider").toBool() && caps.value("renameProvider").toBool() &&
+              caps.value("documentSymbolProvider").toBool() &&
+              caps.value("referencesProvider").toBool(),
+          "the server advertises exactly the methods it implements");
+
+    send(QJsonObject{{"jsonrpc", "2.0"},
+                     {"method", "textDocument/didOpen"},
+                     {"params", QJsonObject{{"textDocument",
+                                             QJsonObject{{"uri", uri}, {"text", text}, {"version", 1}}}}}});
+    recv();  // the diagnostics notification
+
+    send(QJsonObject{{"jsonrpc", "2.0"},
+                     {"id", 2},
+                     {"method", "textDocument/documentSymbol"},
+                     {"params", QJsonObject{{"textDocument", QJsonObject{{"uri", uri}}}}}});
+    const QJsonArray syms = recv().value("result").toArray();
+    check(!syms.isEmpty() &&
+              syms.first().toObject().value("name").toString() == QLatin1String("greet"),
+          "documentSymbol finds the function");
+
+    const QJsonObject at{{"line", 0}, {"character", 5}};  // on `greet`
+    send(QJsonObject{{"jsonrpc", "2.0"},
+                     {"id", 3},
+                     {"method", "textDocument/references"},
+                     {"params", QJsonObject{{"textDocument", QJsonObject{{"uri", uri}}},
+                                            {"position", at}}}});
+    check(recv().value("result").toArray().size() == 2,
+          "references finds the definition AND the call");
+
+    send(QJsonObject{{"jsonrpc", "2.0"},
+                     {"id", 4},
+                     {"method", "textDocument/rename"},
+                     {"params", QJsonObject{{"textDocument", QJsonObject{{"uri", uri}}},
+                                            {"position", at},
+                                            {"newName", QStringLiteral("welcome")}}}});
+    const QJsonObject edit = recv().value("result").toObject();
+    const QJsonArray edits = edit.value("changes").toObject().value(uri).toArray();
+    check(edits.size() == 2 &&
+              edits.first().toObject().value("newText").toString() == QLatin1String("welcome"),
+          "rename edits every reference — and reuses references(), so the two can never disagree");
+
+    send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 9}, {"method", "shutdown"}});
+    recv();
+    send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "exit"}});
+    check(p.waitForFinished(5000) && p.exitCode() == 0, "the server shuts down cleanly");
+
+    const QString src = readSource(QStringLiteral("core/Lsp.cpp"));
+    check(src.contains("if (p.exitCode() != 0) return out;"),
+          "a failed formatter yields NO edits — taking its stdout would replace the file "
+          "with an error message");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -872,6 +985,7 @@ int main(int argc, char** argv) {
     s << "export\n";     s.flush(); testExportImport();
     s << "update\n";     s.flush(); testUpdateSafety();
     s << "acp\n";        s.flush(); testAcp();
+    s << "lsp\n";        s.flush(); testLsp();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

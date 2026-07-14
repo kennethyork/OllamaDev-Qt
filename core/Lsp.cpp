@@ -743,6 +743,185 @@ private:
         return QJsonValue(QJsonValue::Null);  // null: "I looked, there is nothing"
     }
 
+    // ---- symbols, references, rename -------------------------------------
+
+    // A document's top-level symbols, by regex. Deliberately NOT a parser: an LSP
+    // request has to answer in milliseconds, across every language the editor might
+    // open, and a wrong-but-instant outline beats a correct one that arrives after
+    // the user has scrolled away. Anything better than this belongs in `index build`.
+    QJsonArray documentSymbol(const QJsonObject& params) {
+        const QString uri = params.value(QStringLiteral("textDocument"))
+                                .toObject()
+                                .value(QStringLiteral("uri"))
+                                .toString();
+        QJsonArray out;
+        if (!docs_.contains(uri)) return out;
+        const QStringList lines = splitLines(docs_.value(uri).text);
+
+        // name, kind (LSP SymbolKind), pattern
+        static const struct {
+            int kind;
+            const char* re;
+        } kPatterns[] = {
+            {5, R"(^\s*(?:public\s+|final\s+|abstract\s+)*class\s+(\w+))"},          // Class
+            {23, R"(^\s*struct\s+(\w+))"},                                            // Struct
+            {10, R"(^\s*enum(?:\s+class)?\s+(\w+))"},                                 // Enum
+            {11, R"(^\s*(?:interface|trait|protocol)\s+(\w+))"},                      // Interface
+            {12, R"(^\s*(?:def|fn|func|function)\s+(\w+))"},                          // Function
+            {12, R"(^\s*(?:[\w:<>,\*&\s]+\s+)?(\w+)\s*\([^;]*\)\s*(?:const\s*)?\{)"},  // C-ish fn
+            {13, R"(^\s*(?:const|let|var)\s+(\w+))"},                                 // Variable
+        };
+
+        for (int i = 0; i < lines.size(); ++i) {
+            const QString& l = lines.at(i);
+            for (const auto& p : kPatterns) {
+                static QHash<QString, QRegularExpression> cache;
+                const QString key = QString::fromLatin1(p.re);
+                if (!cache.contains(key)) cache.insert(key, QRegularExpression(key));
+                const auto m = cache.value(key).match(l);
+                if (!m.hasMatch()) continue;
+                const QString name = m.captured(1);
+                if (name.isEmpty()) continue;
+                const int col = qMax(0, l.indexOf(name));
+                out.append(QJsonObject{
+                    {"name", name},
+                    {"kind", p.kind},
+                    {"range", range(i, 0, i, l.size())},
+                    {"selectionRange", range(i, col, i, col + name.size())},
+                });
+                break;  // one symbol per line; the first pattern that matches wins
+            }
+        }
+        return out;
+    }
+
+    // Every occurrence of the symbol under the cursor, in the OPEN BUFFER only.
+    // Deliberately not project-wide: the buffer is the only text we know is current,
+    // and an editor that gets a stale location has sent the user somewhere wrong.
+    QJsonArray references(const QJsonObject& params) {
+        const QString uri = params.value(QStringLiteral("textDocument"))
+                                .toObject()
+                                .value(QStringLiteral("uri"))
+                                .toString();
+        QJsonArray out;
+        if (!docs_.contains(uri)) return out;
+        const QJsonObject pos = params.value(QStringLiteral("position")).toObject();
+        const QStringList lines = splitLines(docs_.value(uri).text);
+        const QString word = wordAt(lines, pos.value(QStringLiteral("line")).toInt(),
+                                    pos.value(QStringLiteral("character")).toInt());
+        if (word.isEmpty()) return out;
+
+        // \b…\b: renaming `id` must not match the `id` inside `width`.
+        const QRegularExpression re(QStringLiteral("\\b") + QRegularExpression::escape(word) +
+                                    QStringLiteral("\\b"));
+        for (int i = 0; i < lines.size(); ++i) {
+            auto it = re.globalMatch(lines.at(i));
+            while (it.hasNext()) {
+                const auto m = it.next();
+                out.append(QJsonObject{
+                    {"uri", uri},
+                    {"range", range(i, m.capturedStart(), i, m.capturedEnd())}});
+            }
+        }
+        return out;
+    }
+
+    QJsonValue rename(const QJsonObject& params) {
+        const QString uri = params.value(QStringLiteral("textDocument"))
+                                .toObject()
+                                .value(QStringLiteral("uri"))
+                                .toString();
+        const QString newName = params.value(QStringLiteral("newName")).toString();
+        if (!docs_.contains(uri) || newName.isEmpty()) return QJsonValue(QJsonValue::Null);
+
+        // Reuse references(): the set of edits a rename makes IS the set of
+        // references it found. Two implementations of "where is this symbol" would
+        // eventually disagree, and the day they do, a rename corrupts the file.
+        const QJsonArray refs = references(params);
+        if (refs.isEmpty()) return QJsonValue(QJsonValue::Null);
+
+        QJsonArray edits;
+        for (const QJsonValue& r : refs)
+            edits.append(QJsonObject{{"range", r.toObject().value(QStringLiteral("range"))},
+                                     {"newText", newName}});
+        return QJsonObject{{"changes", QJsonObject{{uri, edits}}}};
+    }
+
+    // ---- formatting ------------------------------------------------------
+
+    // The formatter for a file, or empty if we have none. Config wins; otherwise a
+    // small table of tools, each used ONLY if it is actually installed, and each
+    // invoked the way its own --help says to (gofmt reads stdin when given no path;
+    // rustfmt needs --emit stdout). We do not guess, and we do not pretend: with no
+    // formatter available, formatting returns no edits rather than mangling the file.
+    QStringList formatterFor(const QString& path) const {
+        const QString ext = QFileInfo(path).suffix().toLower();
+        const QString configured = Config::str(QStringLiteral("format.") + ext, QString());
+        if (!configured.isEmpty()) return configured.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+
+        struct Fmt {
+            const char* ext;
+            QStringList argv;
+        };
+        const QVector<Fmt> table{
+            {"go", {QStringLiteral("gofmt")}},
+            {"rs", {QStringLiteral("rustfmt"), QStringLiteral("--emit"), QStringLiteral("stdout")}},
+            {"py", {QStringLiteral("black"), QStringLiteral("-q"), QStringLiteral("-")}},
+            {"c", {QStringLiteral("clang-format")}},
+            {"h", {QStringLiteral("clang-format")}},
+            {"cc", {QStringLiteral("clang-format")}},
+            {"cpp", {QStringLiteral("clang-format")}},
+            {"hpp", {QStringLiteral("clang-format")}},
+        };
+        for (const Fmt& f : table) {
+            if (ext != QLatin1String(f.ext)) continue;
+            if (QStandardPaths::findExecutable(f.argv.first()).isEmpty()) return {};
+            return f.argv;
+        }
+        return {};
+    }
+
+    QJsonArray formatting(const QJsonObject& params) {
+        const QString uri = params.value(QStringLiteral("textDocument"))
+                                .toObject()
+                                .value(QStringLiteral("uri"))
+                                .toString();
+        QJsonArray out;
+        if (!docs_.contains(uri)) return out;
+
+        const QString path = uriToPath(uri);
+        const QStringList argv = formatterFor(path);
+        if (argv.isEmpty()) return out;  // no formatter: no edits, not a mangled file
+
+        const QString text = docs_.value(uri).text;
+        QProcess p;
+        p.setProgram(argv.first());
+        p.setArguments(argv.mid(1));  // argv array: a path with a space is not two args
+        p.setWorkingDirectory(rootPath_.isEmpty() ? QFileInfo(path).absolutePath() : rootPath_);
+        p.start();
+        if (!p.waitForStarted(3000)) return out;
+        p.write(text.toUtf8());
+        p.closeWriteChannel();
+        if (!p.waitForFinished(5000)) {
+            p.kill();  // our own child, by handle
+            p.waitForFinished(1000);
+            return out;
+        }
+        // A formatter that failed says so on stderr and prints nothing useful; taking
+        // its stdout anyway would REPLACE THE WHOLE FILE with an error message.
+        if (p.exitCode() != 0) return out;
+        const QString formatted = QString::fromUtf8(p.readAllStandardOutput());
+        if (formatted.isEmpty() || formatted == text) return out;
+
+        // One edit spanning the whole document. Line-diffing it would be prettier and
+        // is a great way to corrupt a file over an off-by-one.
+        const QStringList lines = splitLines(text);
+        out.append(QJsonObject{
+            {"range", range(0, 0, lines.size(), 0)},
+            {"newText", formatted}});
+        return out;
+    }
+
     // ---- dispatch --------------------------------------------------------
 
     void handle(const QJsonObject& msg) {
@@ -765,14 +944,22 @@ private:
                        .arg(rootPath_.isEmpty() ? QStringLiteral("(none)") : rootPath_,
                             backendId(), model()));
 
+            // Advertise EXACTLY what is implemented, and nothing else. The PHP server
+            // claimed definitionProvider and then never handled
+            // textDocument/definition, so go-to-definition in an editor did nothing
+            // at all and looked like a broken editor rather than a lying server.
             const QJsonObject caps{
                 // Full sync (1): didChange carries the whole document. Incremental
                 // sync would be a second, subtly different copy of the buffer to keep
                 // correct, and the linters need the whole text anyway.
-                {"textDocumentSync", QJsonObject{{"openClose", true}, {"change", 1}}},
+                {"textDocumentSync", QJsonObject{{"openClose", true}, {"change", 1}, {"save", true}}},
                 {"completionProvider", QJsonObject{{"resolveProvider", false}}},
                 {"hoverProvider", true},
                 {"definitionProvider", true},
+                {"documentSymbolProvider", true},
+                {"referencesProvider", true},
+                {"renameProvider", true},
+                {"documentFormattingProvider", true},
             };
             reply(id, QJsonObject{
                          {"capabilities", caps},
@@ -832,7 +1019,43 @@ private:
             return;
         }
 
+        if (method == QLatin1String("textDocument/didSave")) {
+            // The client MAY send the saved text; when it does not, the buffer we
+            // already hold is the same text — it was just written to disk. Re-lint
+            // either way: saving is exactly when a compiler-backed diagnostic becomes
+            // worth re-running.
+            const QString uri = params.value(QStringLiteral("textDocument"))
+                                    .toObject()
+                                    .value(QStringLiteral("uri"))
+                                    .toString();
+            const QJsonValue text = params.value(QStringLiteral("text"));
+            if (text.isString() && docs_.contains(uri)) {
+                Doc d = docs_.value(uri);
+                d.text = text.toString();
+                docs_.insert(uri, d);
+            }
+            if (docs_.contains(uri)) publishDiagnostics(uri);
+            return;
+        }
+
         if (!isRequest) return;  // an unknown NOTIFICATION is simply ignored, per spec
+
+        if (method == QLatin1String("textDocument/documentSymbol")) {
+            reply(id, documentSymbol(params));
+            return;
+        }
+        if (method == QLatin1String("textDocument/references")) {
+            reply(id, references(params));
+            return;
+        }
+        if (method == QLatin1String("textDocument/rename")) {
+            reply(id, rename(params));
+            return;
+        }
+        if (method == QLatin1String("textDocument/formatting")) {
+            reply(id, formatting(params));
+            return;
+        }
 
         if (method == QLatin1String("textDocument/completion")) {
             reply(id, completion(params));
