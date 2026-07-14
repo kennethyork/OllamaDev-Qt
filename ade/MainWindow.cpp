@@ -64,6 +64,36 @@ QJsonObject geomToJson(const QRectF& r) {
 
 QString userShell() { return qEnvironmentVariable("SHELL", QStringLiteral("/bin/bash")); }
 
+// The C++ ollamadev this app must drive — NOT whatever `ollamadev` resolves to on
+// the user's PATH, which may well be an old PHP build in ~/.local/bin. Resolve
+// OUR binary: an explicit override, then next to the app (installed side-by-side,
+// or ../cli in the build tree), then a bundled bin/, and only as a last resort
+// the bare name. Returned shell-quoted so a path with spaces is safe.
+QString odvCli() {
+    static const QString path = [] {
+        const QByteArray env = qgetenv("OLLAMADEV_BINARY");
+        if (!env.isEmpty() && QFileInfo(QString::fromLocal8Bit(env)).isExecutable())
+            return QString::fromLocal8Bit(env);
+        const QString dir = QCoreApplication::applicationDirPath();
+        for (const QString& cand : {dir + "/ollamadev", dir + "/../cli/ollamadev",
+                                    dir + "/../bin/ollamadev", dir + "/bin/ollamadev"}) {
+            const QFileInfo fi(cand);
+            if (fi.isFile() && fi.isExecutable()) return fi.absoluteFilePath();
+        }
+        return QStringLiteral("ollamadev");  // fall back to PATH
+    }();
+    return path.contains(QLatin1Char(' ')) ? QStringLiteral("'%1'").arg(path) : path;
+}
+
+// Rewrite a leading `ollamadev` token to OUR resolved binary; other CLIs
+// (claude/codex/…) are external and stay as-is for PATH to resolve.
+QString withOdvCli(const QString& command) {
+    if (command == QLatin1String("ollamadev")) return odvCli();
+    if (command.startsWith(QLatin1String("ollamadev ")))
+        return odvCli() + command.mid(QStringLiteral("ollamadev").size());
+    return command;
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -334,8 +364,9 @@ Pane* MainWindow::addCliTerminal(const QString& cliId) {
     if (!term) return p;
     term->setProperty("odvKind", cliId);
     p->setTitle(cliId);
-    // The command is just the id — cursor-agent's binary is literally "cursor-agent".
-    term->sendText(cliId + QLatin1Char('\n'));
+    // For our own REPL, launch the C++ binary this app ships — not a stale PHP
+    // `ollamadev` on PATH. Other CLIs are external and launch by their own name.
+    term->sendText(withOdvCli(cliId) + QLatin1Char('\n'));
     return p;
 }
 
@@ -454,12 +485,15 @@ void MainWindow::openFile(const QString& path) {
 }
 
 void MainWindow::runInTerminal(const QString& command) {
+    // Every pane that runs `ollamadev …` goes through here, so this one rewrite
+    // makes the whole app drive the C++ CLI it ships instead of a PATH build.
+    const QString cmd = withOdvCli(command);
     Pane* p = addTerminal(QStringLiteral("term_%1").arg(++termSeq_), project_, QString(), QRectF());
     if (!p) return;
     if (auto* t = p->content()->findChild<TerminalWidget*>())
-        t->sendText(command + QLatin1Char('\n'));
+        t->sendText(cmd + QLatin1Char('\n'));
     else if (auto* t2 = qobject_cast<TerminalWidget*>(p->content()))
-        t2->sendText(command + QLatin1Char('\n'));
+        t2->sendText(cmd + QLatin1Char('\n'));
 }
 
 // ---- Ollama presence -------------------------------------------------------
