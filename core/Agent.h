@@ -45,10 +45,19 @@ public:
     // new bytes — while still parallelising the common "read six files" fan-out.
     void executeCalls(const QVector<ToolCall>& calls, QVector<ChatMessage>& messages);
 
+    // Called at the top of every loop iteration, BEFORE the model is asked
+    // anything. Whatever it returns is appended as a user message, so the caller
+    // can get a word in edgeways mid-run — this is how a human steers a crew coder
+    // that is already working. Return an empty string to say nothing.
+    //
+    // Between iterations, deliberately: a coder must never be interrupted between
+    // deciding to write a file and writing it.
+    using Interject = std::function<QString()>;
+
     // The full bounded loop: turn -> execute -> turn -> … until the model stops
     // calling tools or maxIterations is hit. Returns the final assistant text.
     QString loop(QVector<ChatMessage>& messages, int maxIterations, const StreamSink& sink,
-                 const CancelToken& cancel);
+                 const CancelToken& cancel, const Interject& interject = {});
 
 private:
     // Ensure messages[0] is our system message.

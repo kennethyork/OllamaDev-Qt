@@ -16,6 +16,7 @@
 #include "Sandbox.h"
 #include "SecScan.h"
 #include "Tools.h"
+#include "Crew.h"
 #include "Vision.h"
 
 using namespace odv;
@@ -487,6 +488,62 @@ static void testVision() {
           "a non-image @mention is left for the file-mention path");
 }
 
+// Live steering. Crew::steer wrote steer.jsonl and NOTHING read it back — the
+// board's steer box, the CLI's `crew steer`, and the desktop all wrote into a
+// file no coder ever opened. The fix is a consumer in the coder loop, so the
+// guard is: the writer and the reader must both exist, and the reader must run
+// BETWEEN iterations (never mid-tool, or a coder gets interrupted between
+// deciding to write a file and writing it).
+static void testCrewSteer() {
+    const QString crew = readSource(QStringLiteral("core/Crew.cpp"));
+    check(crew.contains("drainSteer"), "the coder loop actually READS steer.jsonl");
+    check(crew.contains("steerSeen") && crew.contains("f.seek(steerSeen)"),
+          "each coder remembers how far it read, so a steer is delivered exactly once");
+    check(crew.contains("target == 0 || target == n"),
+          "a coder takes messages addressed to it, or to the whole crew (target 0)");
+    check(crew.contains("sink, cancel, drainSteer"),
+          "the drain is wired into Agent::loop as the interject hook");
+
+    const QString agent = readSource(QStringLiteral("core/Agent.cpp"));
+    check(agent.contains("const Interject& interject") && agent.contains("interject()"),
+          "Agent::loop takes a word from the human between iterations");
+    check(agent.contains("sink.onTool"),
+          "the agent reports each tool ACTION, which is what a live pane displays");
+
+    // coderLog is the pane's feed: it must tail by offset, and it must survive a
+    // log that shrank (a new run reusing the id) rather than slicing past the end.
+    QTemporaryDir tmp;
+    const QString runId = QStringLiteral("crew_testlog");
+    const QString dir = Config::crewDir() + QStringLiteral("/") + runId;
+    QDir().mkpath(dir);
+    const QString path = dir + QStringLiteral("/coder-1.log");
+    {
+        QFile f(path);
+        f.open(QIODevice::WriteOnly);
+        f.write("hello");
+        f.close();
+    }
+    qint64 size = 0;
+    QString chunk = Crew::coderLog(runId, 1, 0, &size);
+    check(chunk == QStringLiteral("hello") && size == 5, "coderLog reads from the start");
+    chunk = Crew::coderLog(runId, 1, size, &size);
+    check(chunk.isEmpty(), "coderLog returns nothing new when nothing was written");
+    {
+        QFile f(path);
+        f.open(QIODevice::Append);
+        f.write(" world");
+        f.close();
+    }
+    chunk = Crew::coderLog(runId, 1, 5, &size);
+    check(chunk == QStringLiteral(" world"), "coderLog returns only the DELTA");
+    chunk = Crew::coderLog(runId, 1, 9999, &size);
+    check(chunk == QStringLiteral("hello world"),
+          "an offset past the end restarts rather than slicing past it");
+    check(Crew::coderLog(QStringLiteral("nope"), 1, 0, &size).isEmpty(),
+          "coderLog of a run that never started is empty, not a crash");
+    QDir(dir).removeRecursively();
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -503,6 +560,7 @@ int main(int argc, char** argv) {
     s << "crew-amplify\n"; s.flush(); testCrewAmplify();
     s << "agent-tools\n"; s.flush(); testAgentTools();
     s << "vision\n";      s.flush(); testVision();
+    s << "crew-steer\n";  s.flush(); testCrewSteer();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

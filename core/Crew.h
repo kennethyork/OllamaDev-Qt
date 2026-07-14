@@ -156,6 +156,14 @@ public:
     static QJsonObject boardState();  // ~/.ollamadev/crew/current.json
     static void clearBoard();
 
+    // Tail one coder's live log from `offset`. Returns the new bytes and sets
+    // `size` to the log's current length, which is the offset for the next call —
+    // a desktop pane polls this a few times a second and only ever ships the delta.
+    //
+    // The log carries the coder's raw output PLUS a line per tool call ("→ edit
+    // src/Parser.cpp"), which is what lets a watcher see what it is DOING.
+    static QString coderLog(const QString& runId, int coder, qint64 offset, qint64* size = nullptr);
+
     // One resumable run: a run dir that still has a plan.json. Newest first.
     struct RunInfo {
         QString runId;

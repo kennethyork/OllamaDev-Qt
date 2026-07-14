@@ -165,6 +165,23 @@ ChatTurn Agent::turn(QVector<ChatMessage>& messages, const StreamSink& sink,
     return t;
 }
 
+namespace {
+// The one argument that says what a call is actually DOING. A watcher wants
+// "src/Parser.cpp", not the whole JSON blob.
+QString describeCall(const ToolCall& c) {
+    for (const char* k : {"file_path", "path", "command", "pattern", "expr", "question", "branch",
+                          "src", "message", "bg_id", "name"}) {
+        const QJsonValue v = c.args.value(QLatin1String(k));
+        if (v.isString() && !v.toString().isEmpty()) {
+            QString s = v.toString().simplified();
+            if (s.size() > 60) s = s.left(57) + QStringLiteral("…");
+            return s;
+        }
+    }
+    return {};
+}
+}  // namespace
+
 void Agent::executeCalls(const QVector<ToolCall>& calls, QVector<ChatMessage>& messages) {
     if (calls.isEmpty()) return;
     Tools::registerAll();
@@ -224,7 +241,7 @@ void Agent::executeCalls(const QVector<ToolCall>& calls, QVector<ChatMessage>& m
 }
 
 QString Agent::loop(QVector<ChatMessage>& messages, int maxIterations, const StreamSink& sink,
-                    const CancelToken& cancel) {
+                    const CancelToken& cancel, const Interject& interject) {
     Tools::registerAll();
     const BackendPtr be = Backends::get(backendId_);
     if (!be) return QStringLiteral("Error: unknown backend '%1'").arg(backendId_);
@@ -263,6 +280,18 @@ QString Agent::loop(QVector<ChatMessage>& messages, int maxIterations, const Str
             return last.isEmpty() ? QStringLiteral("(cancelled)")
                                   : last + QStringLiteral("\n\n[cancelled]");
 
+        // A human's word gets in here, before the model is asked anything, so it
+        // lands on the NEXT decision rather than being ignored until the end.
+        if (interject) {
+            const QString word = interject();
+            if (!word.trimmed().isEmpty()) {
+                ChatMessage m;
+                m.role = QStringLiteral("user");
+                m.content = word;
+                messages.append(m);
+            }
+        }
+
         const ChatTurn t = turn(messages, sink, cancel);
         if (!t.ok) {
             const QString err = QStringLiteral("Error: %1").arg(
@@ -272,6 +301,11 @@ QString Agent::loop(QVector<ChatMessage>& messages, int maxIterations, const Str
         if (!t.content.trimmed().isEmpty()) last = t.content;
 
         if (t.calls.isEmpty()) return t.content;  // no tools requested => the model is done
+
+        // Report the ACTION before it happens, so a watcher sees "editing Parser.cpp"
+        // while it is being edited rather than after the fact.
+        if (sink.onTool)
+            for (const ToolCall& c : t.calls) sink.onTool(c.name, describeCall(c));
 
         executeCalls(t.calls, messages);
     }

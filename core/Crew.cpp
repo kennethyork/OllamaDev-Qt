@@ -585,12 +585,57 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 QFile f(log);
                 if (f.open(QIODevice::Append)) f.write(chunk.toUtf8());
             };
+            // Tool activity, logged in a grammar the desktop pane parses back out:
+            //   → edit src/Parser.cpp
+            // Without this the log is a wall of raw model prose, and a watcher
+            // cannot tell a coder that is working from one that is waffling.
+            sink.onTool = [&, n = st.n](const QString& tool, const QString& detail) {
+                QFile f(log);
+                if (f.open(QIODevice::Append))
+                    f.write(QStringLiteral("\n→ %1%2\n")
+                                .arg(tool, detail.isEmpty() ? QString()
+                                                            : QStringLiteral(" ") + detail)
+                                .toUtf8());
+            };
+
+            // Live steering. `steer.jsonl` was WRITE-ONLY until now: Crew::steer
+            // appended to it, the board's steer box wrote into it, and absolutely
+            // nothing ever read it back — so talking to a running coder did nothing
+            // at all. Each coder now drains the lines addressed to it (target 0 =
+            // the whole crew) at the top of each iteration, and remembers how far it
+            // has read so a message is delivered exactly once.
+            const QString steerFile = runDir(runId) + QStringLiteral("/steer.jsonl");
+            qint64 steerSeen = 0;
+            auto drainSteer = [&, n = st.n]() -> QString {
+                QFile f(steerFile);
+                if (!f.open(QIODevice::ReadOnly)) return {};
+                if (!f.seek(steerSeen)) return {};
+                QStringList words;
+                while (!f.atEnd()) {
+                    const QByteArray raw = f.readLine();
+                    const QJsonObject o = QJsonDocument::fromJson(raw).object();
+                    const int target = o.value("target").toInt();
+                    const QString msg = o.value("msg").toString();
+                    if (msg.isEmpty()) continue;
+                    if (target == 0 || target == n) words << msg;
+                }
+                steerSeen = f.pos();
+                if (words.isEmpty()) return {};
+                if (ev.onLog)
+                    ev.onLog(QStringLiteral("coder #%1 heard you: %2").arg(n).arg(words.join("; ")));
+                QFile lf(log);
+                if (lf.open(QIODevice::Append))
+                    lf.write(QStringLiteral("\n[you said: %1]\n").arg(words.join("; ")).toUtf8());
+                return QStringLiteral(
+                           "The human watching you says: %1\n\nTake this into account from here on.")
+                    .arg(words.join(QStringLiteral("\n")));
+            };
 
             // Thread-local, NOT QDir::setCurrent — cwd is process-wide and
             // parallel coders would stomp each other into the wrong sandbox.
             Tools::setThreadRoot(sandboxes[i]);
-            const QString finalText =
-                a.loop(msgs, Config::integer("crew.coderIterations", 10), sink, cancel);
+            const QString finalText = a.loop(msgs, Config::integer("crew.coderIterations", 10),
+                                             sink, cancel, drainSteer);
 
             // A CLI backend streams nothing through the sink (it is a subprocess
             // running its own loop), so without this its log would be empty and a
@@ -1123,6 +1168,20 @@ bool Crew::steer(int coder, const QString& message, QString* err) {
                            {"ts", QDateTime::currentMSecsSinceEpoch()}};
     f.write(json::encode(line) + "\n");
     return true;
+}
+
+QString Crew::coderLog(const QString& runId, int coder, qint64 offset, qint64* size) {
+    if (size) *size = 0;
+    if (runId.isEmpty() || coder <= 0) return {};
+    QFile f(runDir(runId) + QStringLiteral("/coder-%1.log").arg(coder));
+    if (!f.open(QIODevice::ReadOnly)) return {};  // the coder has not started yet
+    const qint64 len = f.size();
+    if (size) *size = len;
+    // A log that SHRANK means it was rotated or a new run reused the id; the old
+    // offset points at nothing real, so start again rather than slice past the end.
+    if (offset < 0 || offset > len) offset = 0;
+    if (!f.seek(offset)) return {};
+    return QString::fromUtf8(f.readAll());
 }
 
 QJsonObject Crew::boardState() {

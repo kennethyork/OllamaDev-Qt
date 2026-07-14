@@ -45,6 +45,14 @@ struct ChatTurn {
 struct StreamSink {
     std::function<void(const QString&)> onContent;
     std::function<void(const QString&)> onThinking;
+
+    // A tool the model just ran, and a one-line human summary of what it did to
+    // (e.g. "edit" / "src/main.cpp"). Emitted by Agent, not by a backend — the
+    // backend only reports the CALL, and what we want to show is the ACTION.
+    //
+    // This is what lets a watcher say "coder #2 is editing Parser.cpp" instead of
+    // showing a wall of raw model tokens and hoping you can read them fast enough.
+    std::function<void(const QString& tool, const QString& detail)> onTool;
 };
 
 // Cooperative cancellation. Checked between stream chunks and between tool
