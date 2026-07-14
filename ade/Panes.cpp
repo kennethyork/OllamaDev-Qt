@@ -12,6 +12,7 @@
 #include "ChatPane.h"
 #include "CodeSearchPane.h"
 #include "CoderPane.h"
+#include "GitPane.h"
 #include "GraphPane.h"
 #include "StartPane.h"
 #include "TasksPane.h"
@@ -31,6 +32,7 @@ void registerExtraPanes() {
     r.add(makeTopologyPaneSpec());
     r.add(makeCoderPaneSpec());
     r.add(makeChatPaneSpec());
+    r.add(makeGitPaneSpec());
     r.add(makeAgentTeamPaneSpec());
     r.add(makeBrainPaneSpec());
 }
