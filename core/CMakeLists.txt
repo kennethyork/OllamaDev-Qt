@@ -18,6 +18,8 @@ add_library(odv-core STATIC
     Skills.cpp Skills.h
     Memory.cpp Memory.h
     Mcp.cpp Mcp.h
+    StdioRpc.cpp StdioRpc.h
+    Workspaces.cpp Workspaces.h
     CodeIndex.cpp CodeIndex.h
     WebSearch.cpp WebSearch.h
     Stt.cpp Stt.h

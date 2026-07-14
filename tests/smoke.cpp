@@ -18,6 +18,7 @@
 #include "Tools.h"
 #include "Crew.h"
 #include "Vision.h"
+#include "Workspaces.h"
 
 using namespace odv;
 
@@ -544,6 +545,56 @@ static void testCrewSteer() {
     QDir(dir).removeRecursively();
 }
 
+// Workspaces read and write the SAME ~/.ollamadev/workspaces.json the PHP app
+// uses, which means the two can be run side by side during the port. The blob the
+// desktop stores in `state` (canvas layout, terminal scrollback — tens of KB of
+// it) is opaque to core, and a CLI `ws add` must never wipe it.
+//
+// HOME is redirected at the top so this never touches the real file.
+static void testWorkspaces() {
+    const QByteArray realHome = qgetenv("HOME");
+    QTemporaryDir home;
+    if (!home.isValid()) {
+        check(false, "temp HOME for the workspace test");
+        return;
+    }
+    qputenv("HOME", home.path().toUtf8());
+
+    QTemporaryDir projA, projB;
+    const Workspace a = Workspaces::add(projA.path(), QStringLiteral("alpha"));
+    Workspaces::add(projB.path(), QStringLiteral("beta"));
+    check(a.id.startsWith(QStringLiteral("ws_")), "a workspace id is derived from its path");
+    check(Workspaces::all().size() == 2, "two workspaces are tracked");
+    check(Workspaces::activeId() != a.id, "the most recently added one is active");
+
+    // The desktop saves its canvas here. A later `ws add` on the same folder must
+    // not clobber it — that would silently lose the user's window layout.
+    const QJsonObject layout{{"panes", 3}, {"zoom", QStringLiteral("100%")}};
+    check(Workspaces::saveState(a.id, layout), "the desktop can save its layout");
+    Workspaces::add(projA.path(), QStringLiteral("alpha-renamed"));
+    Workspace back;
+    check(Workspaces::find(QStringLiteral("alpha-renamed"), &back), "re-adding renames in place");
+    check(Workspaces::all().size() == 2, "re-adding the same path does NOT duplicate it");
+    check(back.state == layout, "re-adding preserves the desktop's saved layout");
+
+    check(Workspaces::find(QStringLiteral("BETA"), &back), "a workspace is found by name, any case");
+    check(Workspaces::find(projB.path(), &back), "…and by path");
+    check(Workspaces::find(back.id, &back), "…and by id");
+
+    check(Workspaces::open(QStringLiteral("alpha-renamed")) == QFileInfo(projA.path()).canonicalFilePath(),
+          "open prints the path (the shell does the cd — a child cannot chdir its parent)");
+    check(Workspaces::activeId() == a.id, "open makes it active");
+
+    // Removing the ACTIVE workspace must not leave `active` dangling.
+    check(Workspaces::remove(QStringLiteral("alpha-renamed")), "remove works");
+    check(Workspaces::all().size() == 1, "…and it is gone");
+    check(!Workspaces::activeId().isEmpty() && Workspaces::activeId() != a.id,
+          "removing the active workspace hands active to a survivor");
+    check(!Workspaces::remove(QStringLiteral("nope")), "removing an unknown workspace fails cleanly");
+
+    qputenv("HOME", realHome);
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -561,6 +612,7 @@ int main(int argc, char** argv) {
     s << "agent-tools\n"; s.flush(); testAgentTools();
     s << "vision\n";      s.flush(); testVision();
     s << "crew-steer\n";  s.flush(); testCrewSteer();
+    s << "workspaces\n"; s.flush(); testWorkspaces();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

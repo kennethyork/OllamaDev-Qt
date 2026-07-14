@@ -39,6 +39,7 @@
 #include "Usage.h"
 #include "Verify.h"
 #include "Vision.h"
+#include "Workspaces.h"
 #include "Version.h"
 #include "Watch.h"
 #include "WebSearch.h"
@@ -377,6 +378,76 @@ int cmdCrew(const QStringList& args) {
     }
 
     return runCrewAndReport(o);
+}
+
+// ------------------------------------------------------------------ workspaces
+
+int cmdWorkspace(const QStringList& args) {
+    const QString sub = args.value(0);
+
+    if (sub.isEmpty() || sub == "list" || sub == "ls") {
+        const auto list = Workspaces::all();
+        if (list.isEmpty()) {
+            out() << "no workspaces yet — bookmark this folder:\n  ollamadev ws add\n";
+            out().flush();
+            return 0;
+        }
+        const QString active = Workspaces::activeId();
+        for (const Workspace& w : list) {
+            out() << (w.id == active ? " * " : "   ") << w.name.leftJustified(20) << "  " << w.path
+                  << "\n";
+        }
+        // A child process cannot change its parent's directory, so `open` PRINTS the
+        // path and the shell does the cd. Say so, or the command looks broken.
+        out() << "\n * = active.  Jump to one:  cd $(ollamadev ws open <name>)\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "add") {
+        const QStringList pos = positionals(args);
+        const Workspace w = Workspaces::add(pos.value(1), pos.value(2));
+        out() << "✓ " << w.name << " → " << w.path << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "remove" || sub == "rm") {
+        const QString key = positionals(args).value(1);
+        if (key.isEmpty()) {
+            err() << "usage: ollamadev ws rm <name|path|id>\n";
+            err().flush();
+            return 2;
+        }
+        if (!Workspaces::remove(key)) {
+            err() << "no workspace '" << key << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ removed " << key << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "open") {
+        const QString key = positionals(args).value(1);
+        const QString path = Workspaces::open(key);
+        if (path.isEmpty()) {
+            // The path goes to STDOUT and nothing else does, because the whole
+            // command is designed to be used as `cd $(…)`. An error on stdout would
+            // be cd'd into.
+            err() << "no workspace '" << key << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << path << "\n";
+        out().flush();
+        return 0;
+    }
+
+    err() << "usage: ollamadev ws [list | add [path] [name] | rm <name> | open <name>]\n";
+    err().flush();
+    return 1;
 }
 
 int cmdBoard(const QStringList& args) {
@@ -2511,6 +2582,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "board") return cmdBoard(rest);
+    if (cmd == "ws" || cmd == "workspace") return cmdWorkspace(rest);
     if (cmd == "scan") return cmdScan(rest);
     if (cmd == "voice") return cmdVoice(rest);
     if (cmd == "transcribe") return cmdTranscribe(rest);
