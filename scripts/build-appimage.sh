@@ -96,6 +96,35 @@ sweep() {
 sweep
 echo "  bundled $(find "$APPDIR/usr/lib" -maxdepth 1 -type f | wc -l) libraries"
 
+# 4b. QtWebEngine runtime — the full Chromium browser. None of this is ldd-visible:
+#     the render process is a separate EXECUTABLE, the .pak/ICU are DATA loaded at
+#     runtime, and NSS (for HTTPS certs) is dlopen()ed. Bundle it all, or the
+#     Browser pane silently falls back / fails to load pages. Skipped cleanly when
+#     the build has no WebEngine (the reader fallback needs none of this).
+QT_LIBEXEC="$(qmake6 -query QT_INSTALL_LIBEXECS 2>/dev/null || echo /usr/lib/qt6/libexec)"
+QT_DATA="$(qmake6 -query QT_INSTALL_DATA 2>/dev/null || echo /usr/share/qt6)"
+QT_TR="$(qmake6 -query QT_INSTALL_TRANSLATIONS 2>/dev/null || echo /usr/share/qt6/translations)"
+WEBPROC="$QT_LIBEXEC/QtWebEngineProcess"
+if [ -x "$WEBPROC" ] && ldd "$APPDIR/usr/bin/ollamadev-ade" 2>/dev/null | grep -q WebEngineCore; then
+  echo "▸ bundling QtWebEngine (full browser)…"
+  mkdir -p "$APPDIR/usr/libexec" "$APPDIR/usr/resources" \
+           "$APPDIR/usr/translations/qtwebengine_locales"
+  cp -L "$WEBPROC" "$APPDIR/usr/libexec/"
+  bundle_libs "$WEBPROC"; sweep   # the render process pulls its own deps
+  # Chromium data: resource paks (+ ICU if shipped separately) and the locale paks.
+  for pak in "$QT_DATA"/resources/*.pak; do [ -e "$pak" ] && cp -L "$pak" "$APPDIR/usr/resources/"; done
+  [ -e "$QT_DATA/resources/icudtl.dat" ] && cp -L "$QT_DATA/resources/icudtl.dat" "$APPDIR/usr/resources/"
+  cp -L "$QT_TR"/qtwebengine_locales/*.pak "$APPDIR/usr/translations/qtwebengine_locales/" 2>/dev/null || true
+  # NSS: libnss3 dlopens its softoken/cert modules — ldd misses them, so copy the
+  # whole nss dir. HTTPS is dead without libnssckbi (the CA bundle).
+  for d in /usr/lib/x86_64-linux-gnu/nss /usr/lib64/nss; do
+    [ -d "$d" ] && cp -L "$d"/*.so "$APPDIR/usr/lib/" 2>/dev/null || true
+  done
+  echo "  webengine process + $(find "$APPDIR/usr/resources" -type f | wc -l) resource file(s)"
+else
+  echo "▸ QtWebEngine not in this build — Browser pane ships the reader fallback"
+fi
+
 # 5. qt.conf makes Qt look for its plugins inside the AppDir instead of the build
 #    machine's absolute paths, which is what it would otherwise bake in.
 cat > "$APPDIR/usr/bin/qt.conf" <<'CONF'
@@ -114,6 +143,17 @@ export QT_QPA_PLATFORM_PLUGIN_PATH="$HERE/usr/plugins/platforms"
 # The desktop app shells out to the agent CLI; point it at the copy we bundled
 # rather than whatever happens to be on the user's PATH.
 export OLLAMADEV_BINARY="$HERE/usr/bin/ollamadev"
+
+# QtWebEngine: point the browser at the render process, Chromium data and locales
+# we bundled. The Chromium sandbox needs a setuid helper or user namespaces that an
+# AppImage cannot guarantee, so disable it — the pages we load are ordinary web,
+# not untrusted code we are trying to contain.
+if [ -x "$HERE/usr/libexec/QtWebEngineProcess" ]; then
+  export QTWEBENGINEPROCESS_PATH="$HERE/usr/libexec/QtWebEngineProcess"
+  export QTWEBENGINE_RESOURCES_PATH="$HERE/usr/resources"
+  export QTWEBENGINE_LOCALES_PATH="$HERE/usr/translations/qtwebengine_locales"
+  export QTWEBENGINE_DISABLE_SANDBOX=1
+fi
 
 # `--cli …` (or symlinking/renaming the AppImage to `ollamadev`) runs the agent
 # CLI; anything else launches the desktop.

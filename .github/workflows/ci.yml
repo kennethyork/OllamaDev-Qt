@@ -68,7 +68,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake qt6-base-dev qt6-base-dev-tools \
+            build-essential cmake qt6-base-dev qt6-base-dev-tools qt6-webengine-dev qt6-webengine-dev-tools \
             libgl1-mesa-dev libxkbcommon-x11-0 xvfb file desktop-file-utils
 
       - name: Build AppImage
@@ -114,7 +114,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake qt6-base-dev qt6-base-dev-tools \
+            build-essential cmake qt6-base-dev qt6-base-dev-tools qt6-webengine-dev qt6-webengine-dev-tools \
             libgl1-mesa-dev libxkbcommon-x11-0 xvfb file desktop-file-utils
 
       - name: Build artifacts
