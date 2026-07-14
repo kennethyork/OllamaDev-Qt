@@ -30,7 +30,7 @@ void LineGutter::paintEvent(QPaintEvent* e) { editor_->paintGutter(e); }
 
 CodeEdit::CodeEdit(QWidget* parent) : QPlainTextEdit(parent) {
     gutter_ = new LineGutter(this);
-    setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    setFont(Theme::withEmoji(QFontDatabase::systemFont(QFontDatabase::FixedFont)));
     setLineWrapMode(QPlainTextEdit::NoWrap);
     setTabStopDistance(fontMetrics().horizontalAdvance(' ') * 4);
 

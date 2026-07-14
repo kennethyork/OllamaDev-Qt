@@ -1,5 +1,7 @@
 #include "Theme.h"
 
+#include <QFontDatabase>
+
 #include <QApplication>
 #include <QHash>
 #include <QJsonDocument>
@@ -397,6 +399,27 @@ QScrollArea { border: none; background: transparent; }
             .replace("%SOFT2%", soft(c.accent, 0.07))
             .replace("%SOFT%", soft(c.accent, 0.16));
     app->setStyleSheet(css);
+}
+
+QFont Theme::withEmoji(QFont f) {
+    // Found once: QFontDatabase::families() walks fontconfig, and this is called
+    // from paint paths.
+    static const QString emoji = [] {
+        const QStringList have = QFontDatabase::families();
+        for (const QString& c : {QStringLiteral("Noto Color Emoji"), QStringLiteral("Noto Emoji"),
+                                 QStringLiteral("Apple Color Emoji"),
+                                 QStringLiteral("Segoe UI Emoji"), QStringLiteral("Symbola")}) {
+            if (have.contains(c)) return c;
+        }
+        return QString();  // none installed: leave every font exactly as it was
+    }();
+    if (emoji.isEmpty()) return f;
+
+    QStringList families = f.families();
+    if (families.isEmpty()) families << f.family();
+    if (!families.contains(emoji)) families << emoji;
+    f.setFamilies(families);
+    return f;
 }
 
 }  // namespace odv
