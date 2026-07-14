@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QProcess>
 
+#include "../ade/GitGraph.h"
 #include "Backend.h"
 #include "Config.h"
 #include "Hooks.h"
@@ -963,6 +964,48 @@ static void testLsp() {
           "with an error message");
 }
 
+// The commit graph. Lane assignment is the part of a git GUI that is either right
+// or obviously, embarrassingly wrong, so it is tested against a hand-built history
+// with a branch and a merge in it — the only shape that actually exercises lanes.
+static void testGitGraph() {
+    //   e (merge of c and d)
+    //   |\
+    //   c d
+    //   |/
+    //   b
+    //   |
+    //   a
+    const QString log = QStringLiteral(
+        "e|c d|kenny|2026-07-14|HEAD -> main|merge the branch\n"
+        "d|b|kenny|2026-07-14|feature|the feature\n"
+        "c|b|kenny|2026-07-14||more work on main\n"
+        "b|a|kenny|2026-07-14||second\n"
+        "a||kenny|2026-07-14||first\n");
+
+    QVector<GraphCommit> commits = GitGraph::parse(log);
+    check(commits.size() == 5, "the graph parses every commit");
+    check(commits.first().parents.size() == 2, "a merge commit has two parents");
+    check(commits.first().isHead, "HEAD is marked");
+    check(commits.at(1).refs.contains(QStringLiteral("feature")), "a branch ref is attached");
+    check(commits.at(4).parents.isEmpty(), "the root commit has no parent");
+    check(commits.first().subject == QStringLiteral("merge the branch"),
+          "the subject survives (it is the last field, so a '|' in it is safe)");
+
+    const int widest = GitGraph::layout(commits);
+    check(widest >= 2, "the branch opens a second lane");
+    check(commits.first().lane == 0, "the merge sits in the lane it was already in");
+
+    // The two sides of the merge must NOT share a lane, or the graph draws them as
+    // one line and the branch is invisible — which is the whole point of the graph.
+    check(commits.at(1).lane != commits.at(2).lane,
+          "the two sides of a merge are drawn in DIFFERENT lanes");
+
+    // …and they must come back together: `b` is the parent of both, so by the time
+    // it is drawn only one lane is left alive.
+    check(commits.at(3).lanesWide == 1, "the lanes collapse again once the branch rejoins");
+    check(commits.at(4).lanesWide == 1, "…and stay collapsed down to the root");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -986,6 +1029,7 @@ int main(int argc, char** argv) {
     s << "update\n";     s.flush(); testUpdateSafety();
     s << "acp\n";        s.flush(); testAcp();
     s << "lsp\n";        s.flush(); testLsp();
+    s << "git-graph\n";  s.flush(); testGitGraph();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();
