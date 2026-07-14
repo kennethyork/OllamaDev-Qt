@@ -19,6 +19,7 @@ struct Subtask {
     QString backend;  // "ollama" | "claude" | "codex" | ...
     QString model;
     QString state;    // todo | doing | done | held | flagged
+    QString route;    // the tier the router chose (simple|moderate|hard), or empty
 };
 
 struct AuditResult {
@@ -56,6 +57,14 @@ struct CrewOptions {
 
     // 0 = auto (derive from each backend's real concurrency limit).
     int parallel = 0;
+
+    // The routing "brain": when on, any role with no explicitly pinned model gets
+    // one auto-picked by difficulty — the Director and Auditor reason hard, the
+    // Researcher moderate, and each coder is routed on ITS OWN subtask (difficulty
+    // is a property of the subtask, not the role). Only applies to Ollama roles; a
+    // Claude/Codex coder already brings its own model. An explicit --*-model always
+    // wins over the router.
+    bool route = false;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI

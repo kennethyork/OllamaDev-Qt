@@ -28,6 +28,7 @@
 #include "Models.h"
 #include "Onboard.h"
 #include "Parallel.h"
+#include "Router.h"
 #include "Puller.h"
 #include "Repl.h"
 #include "SecScan.h"
@@ -233,6 +234,7 @@ int cmdCrew(const QStringList& args) {
     o.focus = flagValue(args, "--focus");
     o.research = !hasFlag(args, "--no-research");
     o.audit = !hasFlag(args, "--no-audit");
+    o.route = hasFlag(args, "--route");  // auto-pick each role's model by difficulty
     o.land = hasFlag(args, "--review") ? "review" : Config::str("crew.land", "auto");
     o.coderBackend = flagValue(args, "--coder-backend");
     o.coderModel = flagValue(args, "--coder-model");
@@ -2297,6 +2299,39 @@ int main(int argc, char** argv) {
 
     if (cmd == "context") {
         out() << ContextTuner::report();
+        out().flush();
+        return 0;
+    }
+
+    if (cmd == "route") {
+        // `route "<prompt>"` shows which model the brain would pick (and why);
+        // `route --run "<prompt>"` then answers on it.
+        const QString prompt = positionals(args).mid(1).join(' ');
+        if (prompt.isEmpty()) {
+            err() << "usage: ollamadev route [--run] \"<prompt>\"\n";
+            err().flush();
+            return 2;
+        }
+        const RouteDecision d = Router::pick(prompt);
+        out() << "→ " << d.tier << "  " << d.backend << ":" << d.model << "  (" << d.reason
+              << ")\n";
+        out().flush();
+        if (!hasFlag(args, "--run")) return 0;
+        // Answer on the chosen model.
+        Agent a(d.backend, d.model);
+        Permission::setMode(PermMode::Auto);
+        Tools::setThreadRoot(QDir::currentPath());
+        QVector<ChatMessage> msgs{
+            {"system", a.buildSystemPrompt(QDir::currentPath()), {}, {}, {}, {}, {}},
+            {"user", prompt, {}, {}, {}, {}, {}}};
+        StreamSink sink;
+        sink.onContent = [](const QString& c) {
+            out() << c;
+            out().flush();
+        };
+        CancelToken cancel;
+        a.loop(msgs, Config::integer("agents.maxIterations", 20), sink, cancel);
+        out() << "\n";
         out().flush();
         return 0;
     }

@@ -36,6 +36,7 @@ add_library(odv-core STATIC
     AgentDefs.cpp AgentDefs.h
     Usage.cpp Usage.h
     ContextTuner.cpp ContextTuner.h
+    Router.cpp Router.h
 )
 
 target_include_directories(odv-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

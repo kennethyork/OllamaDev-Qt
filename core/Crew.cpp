@@ -16,6 +16,7 @@
 #include "Json.h"
 #include "Models.h"
 #include "Parallel.h"
+#include "Router.h"
 #include "SecScan.h"
 #include "Skills.h"
 #include "Tools.h"
@@ -65,7 +66,8 @@ void publishBoard(const QString& runId, const QString& task, const QVector<Subta
                                {"role", s.role},
                                {"state", s.state},
                                {"backend", s.backend},
-                               {"model", s.model}});
+                               {"model", s.model},
+                               {"route", s.route}});
     }
     QJsonObject o{{"runId", runId},
                   {"task", task},
@@ -101,13 +103,21 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         auto b = Backends::get(backendId);
         return b ? b->defaultModel() : QString();
     };
+    // The routing brain for the fixed-tier roles. An explicit model still wins;
+    // otherwise, with --route on, an Ollama role gets the model for its tier.
+    auto routedForTier = [&](const QString& backendId, const QString& want,
+                             const QString& tier) -> QString {
+        if (!want.isEmpty()) return want;
+        if (opts.route && backendId == QLatin1String("ollama")) return Router::modelForTier(tier);
+        return modelFor(backendId, want);
+    };
 
     // ---- Researcher (read-only, shared context for everyone downstream) ----
     QString research;
     if (opts.research && !cancel.cancelled()) {
         phase("research", "investigating the codebase");
         const QString rb = backendFor(opts.researcherBackend);
-        Agent r(rb, modelFor(rb, opts.researcherModel));
+        Agent r(rb, routedForTier(rb, opts.researcherModel, QStringLiteral("moderate")));
         Permission::setMode(PermMode::ReadOnly);
         Permission::setInteractive(false);
         QVector<ChatMessage> msgs{
@@ -127,7 +137,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     QVector<Subtask> subs;
     {
         const QString db = backendFor(opts.directorBackend);
-        Agent d(db, modelFor(db, opts.directorModel));
+        Agent d(db, routedForTier(db, opts.directorModel, QStringLiteral("hard")));
         QString sys = QStringLiteral(
             "You are the Director. Decompose the task into at most %1 INDEPENDENT subtasks that, "
             "wherever possible, touch DIFFERENT files so they can be built in parallel without "
@@ -187,6 +197,13 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 const QString pinned = CrewRoles::get(s.role).model;
                 if (!pinned.isEmpty()) {
                     s.model = pinned;
+                } else if (opts.route && s.backend == QLatin1String("ollama")) {
+                    // Route each coder on its OWN subtask — a "rename a variable"
+                    // subtask and a "design the parser" subtask should not get the
+                    // same model just because they are in the same run.
+                    const RouteDecision rd = Router::pick(s.title + "\n" + s.prompt);
+                    s.model = rd.model;
+                    s.route = rd.tier;
                 } else if (s.backend == sessionBackend) {
                     s.model = sessionModel;
                 } else if (auto b = Backends::get(s.backend)) {
@@ -201,6 +218,18 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         return out;
     }
     out.subtasks = subs;
+
+    // Always show who is doing what on which model — the "different models for
+    // different parts" view, whether they were routed or set by hand.
+    if (ev.onLog) {
+        ev.onLog(QStringLiteral("model plan%1:").arg(opts.route ? " (routed)" : ""));
+        for (const auto& s : subs) {
+            ev.onLog(QStringLiteral("  coder #%1 [%2] %3:%4%5")
+                         .arg(s.n)
+                         .arg(s.role, s.backend, s.model,
+                              s.route.isEmpty() ? QString() : QStringLiteral(" · %1").arg(s.route)));
+        }
+    }
     publishBoard(runId, opts.task, subs, true);
 
     // ---- Admission control ------------------------------------------------
@@ -348,7 +377,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     if (opts.audit && !cancel.cancelled()) {
         phase("audit", "reviewing every changeset");
         const QString ab = backendFor(opts.auditorBackend);
-        const QString am = modelFor(ab, opts.auditorModel);
+        const QString am = routedForTier(ab, opts.auditorModel, QStringLiteral("hard"));
         parallelRun(
             results.size(), [&](int) { return limiterKey(ab, am); },
             [&](int i) -> QJsonObject {
