@@ -1,14 +1,13 @@
 #include "BrainPane.h"
 
-#include <QFrame>
-#include <QGridLayout>
-#include <QHBoxLayout>
 #include <QGroupBox>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -21,26 +20,48 @@
 namespace odv {
 namespace {
 
-QColor tierColor(const QString& tier) {
-    const Theme::Colors c = Theme::currentColors();
-    if (tier == QLatin1String("simple")) return c.ok;
-    if (tier == QLatin1String("hard")) return c.err;
-    return c.accent;  // moderate
+// Every faculty of the crew's brain, in pipeline order. `optIn` parts (debate,
+// dedupe, security) are drawn dimmer — they exist but only fire when asked for.
+struct Part {
+    QString key;
+    QString label;
+    QString role;    // what this faculty does, one line
+    bool optIn;
+};
+
+const QVector<Part>& parts() {
+    static const QVector<Part> p{
+        {"researcher", "Researcher", "reads the codebase (read-only)", false},
+        {"router",     "Router",     "picks the model for each role by difficulty", false},
+        {"director",   "Director",   "decomposes the task into subtasks", false},
+        {"roles",      "Roles",      "assigns a persona to each subtask", false},
+        {"skills",     "Skills",     "loads know-how matched to the focus", false},
+        {"coders",     "Coders",     "build in parallel sandboxes", false},
+        {"auditor",    "Auditor",    "reviews every changeset", false},
+        {"debate",     "Debate",     "advocate vs skeptic vs judge", true},
+        {"dedupe",     "Dedupe",     "holds duplicated work", true},
+        {"security",   "Security",   "read-only vulnerability hunt", true},
+        {"secret",     "Secret gate", "never lands a leaked credential", false},
+        {"overlap",    "Overlap guard", "first-writer-wins on a shared file", false},
+        {"landing",    "Landing",    "copies accepted files into your folder", false},
+        {"memory",     "Memory",     "remembers facts for next time", false},
+    };
+    return p;
 }
 
-// One "lobe": a titled box that draws a tier and the model it maps to.
-class Lobe : public QFrame {
+// The painted brain map: all parts as connected nodes flowing top→bottom, the
+// active one during a live run highlighted.
+class BrainMap : public QWidget {
 public:
-    Lobe(const QString& tier, QWidget* parent = nullptr) : QFrame(parent), tier_(tier) {
-        setMinimumHeight(72);
-        setFrameShape(QFrame::StyledPanel);
+    explicit BrainMap(QWidget* parent = nullptr) : QWidget(parent) {
+        setMinimumHeight(int(parts().size()) * 46 + 20);
     }
-    void setModel(const QString& m) {
-        model_ = m;
+    void setActive(const QString& key) {
+        active_ = key;
         update();
     }
-    void setActive(bool a) {
-        active_ = a;
+    void setCoderStates(const QStringList& states) {
+        coderStates_ = states;
         update();
     }
 
@@ -48,34 +69,72 @@ protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        const QColor col = tierColor(tier_);
-        QRectF r = rect().adjusted(2, 2, -2, -2);
-        p.setPen(QPen(col, active_ ? 2.5 : 1.0));
-        p.setBrush(QColor(col.red(), col.green(), col.blue(), active_ ? 46 : 22));
-        p.drawRoundedRect(r, 10, 10);
+        const Theme::Colors c = Theme::currentColors();
 
-        p.setPen(Theme::currentColors().fg);
-        QFont f = font();
-        f.setBold(true);
-        p.setFont(f);
-        p.drawText(r.adjusted(12, 8, -12, 0), Qt::AlignLeft | Qt::AlignTop, tier_.toUpper());
-        f.setBold(false);
-        p.setFont(f);
-        p.setPen(Theme::currentColors().dim);
-        const QString sub = tier_ == QLatin1String("simple")   ? QStringLiteral("trivia, lookups")
-                            : tier_ == QLatin1String("hard")   ? QStringLiteral("design, debug, proofs")
-                                                               : QStringLiteral("general work");
-        p.drawText(r.adjusted(12, 26, -12, 0), Qt::AlignLeft | Qt::AlignTop, sub);
-        p.setPen(col);
-        f.setBold(true);
-        p.setFont(f);
-        p.drawText(r.adjusted(12, 0, -12, -8), Qt::AlignLeft | Qt::AlignBottom,
-                   model_.isEmpty() ? QStringLiteral("(no model)") : model_);
+        const int n = int(parts().size());
+        const qreal rowH = qreal(height() - 20) / n;
+        const qreal x = 14, w = width() - 28;
+
+        QVector<QRectF> boxes(n);
+        for (int i = 0; i < n; ++i)
+            boxes[i] = QRectF(x, 10 + i * rowH, w, rowH - 10);
+
+        // Connecting spine between consecutive parts.
+        p.setPen(QPen(c.border, 1.5));
+        for (int i = 0; i + 1 < n; ++i) {
+            const QPointF a(boxes[i].center().x(), boxes[i].bottom());
+            const QPointF b(boxes[i + 1].center().x(), boxes[i + 1].top());
+            p.drawLine(a, b);
+        }
+
+        for (int i = 0; i < n; ++i) {
+            const Part& part = parts().at(i);
+            const bool isActive = (part.key == active_);
+            QColor accent = part.optIn ? c.warn : c.accent;
+            if (part.key == "secret" || part.key == "overlap") accent = c.err;
+            if (part.key == "router") accent = c.accent2;
+
+            QRectF r = boxes[i];
+            const int baseA = part.optIn ? 16 : 30;
+            p.setPen(QPen(accent, isActive ? 2.5 : 1.0));
+            p.setBrush(QColor(accent.red(), accent.green(), accent.blue(),
+                              isActive ? 70 : baseA));
+            p.drawRoundedRect(r, 9, 9);
+
+            // Label + role.
+            QFont f = font();
+            f.setBold(true);
+            p.setFont(f);
+            p.setPen(part.optIn && !isActive ? c.dim : c.fg);
+            p.drawText(r.adjusted(14, 4, -14, 0), Qt::AlignLeft | Qt::AlignTop, part.label);
+            f.setBold(false);
+            p.setFont(f);
+            p.setPen(c.dim);
+            QString role = part.role;
+            if (part.optIn) role += QStringLiteral("   · opt-in");
+            p.drawText(r.adjusted(14, 0, -14, -4), Qt::AlignLeft | Qt::AlignBottom, role);
+
+            // Coders row shows the live per-coder state as dots.
+            if (part.key == "coders" && !coderStates_.isEmpty()) {
+                qreal dx = r.right() - 16;
+                for (int s = coderStates_.size() - 1; s >= 0; --s) {
+                    const QString st = coderStates_.at(s);
+                    QColor dc = st == "done"    ? c.ok
+                                : st == "held"  ? c.warn
+                                : st == "doing" ? c.accent2
+                                                : c.dim;
+                    p.setPen(Qt::NoPen);
+                    p.setBrush(dc);
+                    p.drawEllipse(QPointF(dx, r.center().y()), 5, 5);
+                    dx -= 15;
+                }
+            }
+        }
     }
 
 private:
-    QString tier_, model_;
-    bool active_ = false;
+    QString active_;
+    QStringList coderStates_;
 };
 
 class BrainWidget : public QWidget {
@@ -83,51 +142,40 @@ public:
     explicit BrainWidget(PaneHost& host, QWidget* parent = nullptr) : QWidget(parent), host_(host) {
         auto* root = new QVBoxLayout(this);
         root->setContentsMargins(10, 10, 10, 10);
-        root->setSpacing(10);
+        root->setSpacing(8);
 
-        auto* title = new QLabel(tr("🧠 Routing brain"), this);
+        auto* title = new QLabel(tr("🧠 The crew's brain"), this);
         QFont tf = title->font();
         tf.setBold(true);
         tf.setPointSizeF(tf.pointSizeF() + 2);
         title->setFont(tf);
         root->addWidget(title);
 
-        // The three lobes: tier → model it currently resolves to.
-        auto* lobes = new QHBoxLayout;
-        for (const QString& t : {QStringLiteral("simple"), QStringLiteral("moderate"),
-                                 QStringLiteral("hard")}) {
-            auto* l = new Lobe(t, this);
-            lobes_.insert(t, l);
-            lobes->addWidget(l);
-        }
-        root->addLayout(lobes);
+        map_ = new BrainMap(this);
+        root->addWidget(map_, 1);
 
-        // Live classifier — type a prompt, watch the brain choose.
-        auto* tryBox = new QGroupBox(tr("Try it — where would this go?"), this);
+        // Router tiers — the model each difficulty maps to right now.
+        tiers_ = new QLabel(this);
+        tiers_->setTextFormat(Qt::RichText);
+        tiers_->setWordWrap(true);
+        root->addWidget(tiers_);
+
+        // Live classifier.
+        auto* tryBox = new QGroupBox(tr("Try the router — where would this go?"), this);
         auto* tl = new QVBoxLayout(tryBox);
         probe_ = new QLineEdit(tryBox);
         probe_->setPlaceholderText(tr("type a request…  e.g. \"design a lock-free queue\""));
         verdict_ = new QLabel(tryBox);
+        verdict_->setTextFormat(Qt::RichText);
         verdict_->setWordWrap(true);
         tl->addWidget(probe_);
         tl->addWidget(verdict_);
         root->addWidget(tryBox);
         connect(probe_, &QLineEdit::textChanged, this, [this](const QString& s) { classify(s); });
 
-        // The live crew's routed model plan.
-        crewBox_ = new QGroupBox(tr("Crew model plan"), this);
-        auto* cl = new QVBoxLayout(crewBox_);
-        crewPlan_ = new QLabel(tr("no crew running"), crewBox_);
-        crewPlan_->setTextFormat(Qt::RichText);
-        cl->addWidget(crewPlan_);
-        root->addWidget(crewBox_);
-
-        // Token split — free local vs paid cloud.
         tokens_ = new QLabel(this);
         tokens_->setTextFormat(Qt::RichText);
         root->addWidget(tokens_);
-
-        root->addStretch(1);
 
         refresh();
         auto* t = new QTimer(this);
@@ -139,68 +187,63 @@ private:
     void classify(const QString& s) {
         if (s.trimmed().isEmpty()) {
             verdict_->clear();
-            for (auto* l : lobes_) l->setActive(false);
             return;
         }
         const RouteDecision d = Router::pick(s);
-        for (auto it = lobes_.constBegin(); it != lobes_.constEnd(); ++it)
-            it.value()->setActive(it.key() == d.tier);
-        verdict_->setText(tr("→ <b>%1</b> · <b>%2</b><br><span style='color:%3'>%4</span>")
+        verdict_->setText(tr("→ <b>%1</b> · <b>%2</b> &nbsp;<span style='color:%3'>%4</span>")
                               .arg(d.tier.toUpper(), d.model,
                                    Theme::currentColors().dim.name(), d.reason));
     }
 
     void refresh() {
-        // Tier→model map can change as models are pulled/removed.
-        for (auto it = lobes_.constBegin(); it != lobes_.constEnd(); ++it)
-            it.value()->setModel(Router::modelForTier(it.key()));
+        const Theme::Colors c = Theme::currentColors();
+        auto chip = [&](const QString& tier, const QColor& col) {
+            return tr("<b style='color:%1'>%2</b> %3")
+                .arg(col.name(), tier.toUpper(), Router::modelForTier(tier));
+        };
+        tiers_->setText(tr("Router tiers: &nbsp; %1 &nbsp;·&nbsp; %2 &nbsp;·&nbsp; %3")
+                            .arg(chip("simple", c.ok), chip("moderate", c.accent),
+                                 chip("hard", c.err)));
 
-        // Crew plan.
+        // Live crew state → which faculty is active + coder dots.
         const QJsonObject board = Crew::boardState();
         const QJsonArray subs = board.value("subtasks").toArray();
+        QStringList states;
+        QString active;
         if (board.value("active").toBool() && !subs.isEmpty()) {
-            QString html;
+            bool anyDoing = false, anyTodo = false, allDone = true;
             for (const auto& v : subs) {
-                const QJsonObject s = v.toObject();
-                const QString route = s.value("route").toString();
-                const QString col = tierColor(route.isEmpty() ? QStringLiteral("moderate") : route)
-                                        .name();
-                html += tr("<div>coder #%1 <span style='color:%2'>%3</span> · %4%5</div>")
-                            .arg(s.value("n").toInt())
-                            .arg(col, s.value("model").toString(), s.value("backend").toString(),
-                                 route.isEmpty() ? QString()
-                                                 : QStringLiteral(" · %1").arg(route));
+                const QString st = v.toObject().value("state").toString();
+                states << st;
+                if (st == "doing") anyDoing = true;
+                if (st == "todo") anyTodo = true;
+                if (st != "done") allDone = false;
             }
-            crewPlan_->setText(html);
-        } else {
-            crewPlan_->setText(tr("<i>no crew running</i>"));
+            active = anyDoing ? "coders" : anyTodo ? "director" : allDone ? "landing" : "auditor";
         }
+        map_->setActive(active);
+        map_->setCoderStates(states);
 
-        // Token split.
         qint64 local = 0, cloud = 0;
         const QMap<QString, Usage::Tally> snap = Usage::snapshot();
         for (auto it = snap.constBegin(); it != snap.constEnd(); ++it)
             (Models::isCloud(it.key()) ? cloud : local) += it.value().total();
         const qint64 total = local + cloud;
-        if (total > 0) {
-            tokens_->setText(
-                tr("<b>Tokens (project):</b> %1 total · "
-                   "<span style='color:%2'>%3%% free local</span> · %4%% cloud")
-                    .arg(total)
-                    .arg(Theme::currentColors().ok.name())
-                    .arg(local * 100 / total)
-                    .arg(cloud * 100 / total));
-        } else {
-            tokens_->setText(tr("<i>no tokens recorded yet</i>"));
-        }
+        tokens_->setText(total > 0
+                             ? tr("<b>Tokens:</b> %1 · <span style='color:%2'>%3%% free "
+                                  "local</span> · %4%% cloud")
+                                   .arg(total)
+                                   .arg(c.ok.name())
+                                   .arg(local * 100 / total)
+                                   .arg(cloud * 100 / total)
+                             : tr("<i>no tokens recorded yet</i>"));
     }
 
     PaneHost& host_;
-    QMap<QString, Lobe*> lobes_;
+    BrainMap* map_ = nullptr;
+    QLabel* tiers_ = nullptr;
     QLineEdit* probe_ = nullptr;
     QLabel* verdict_ = nullptr;
-    QGroupBox* crewBox_ = nullptr;
-    QLabel* crewPlan_ = nullptr;
     QLabel* tokens_ = nullptr;
 };
 
