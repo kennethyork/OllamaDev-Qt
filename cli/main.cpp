@@ -129,6 +129,7 @@ void printHelp() {
           << "  ollamadev crew discard <n>   throw held work away\n"
           << "  ollamadev crew steer <n> \"…\" talk to a running coder\n"
           << "  ollamadev crew resume [id]   finish an interrupted run (no id = latest)\n"
+          << "                               add --replan to re-run the Director on the saved task\n"
           << "  ollamadev crew role|pack     personas the Director assigns · saved crew configs\n"
           << "  ollamadev board              pending decisions\n"
           << "  crew brain options (all opt-in — plain crew is unchanged):\n"
@@ -277,7 +278,8 @@ int cmdCrewResume(const QStringList& args) {
         out().flush();
         return 0;
     }
-    QString runId = args.value(0);
+    const bool replan = hasFlag(args, "--replan");
+    QString runId = positionals(args).value(0);  // first non-flag word
     if (runId.isEmpty()) {
         if (runs.isEmpty()) {
             err() << "no run to resume — start one with: ollamadev crew \"…\"\n";
@@ -285,11 +287,13 @@ int cmdCrewResume(const QStringList& args) {
             return 1;
         }
         runId = runs.first().runId;  // newest
-        out() << "resuming " << runId << "\n";
-        out().flush();
     }
+    out() << "resuming " << runId << (replan ? " (re-planning)\n" : "\n");
+    out().flush();
     CrewOptions o;
     o.resumeRunId = runId;
+    o.replan = replan;
+    o.maxCoders = flagValue(args, "--max", "4").toInt();  // used only when --replan re-runs the Director
     return runCrewAndReport(o);
 }
 

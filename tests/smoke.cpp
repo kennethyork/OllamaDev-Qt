@@ -255,9 +255,12 @@ static void testCrewResume() {
           "run() branches on resumeRunId to reload the plan instead of re-planning");
     check(crew.contains("skipRun"),
           "resume skips coders that already finished (done/held)");
+    check(crew.contains("replan"),
+          "resume can re-run the Director (--replan) instead of replaying the plan");
     const QString cli = readSource(QStringLiteral("cli/main.cpp"));
     check(cli.contains("cmdCrewResume") && cli.contains("\"resume\""),
           "CLI wires `crew resume`");
+    check(cli.contains("--replan"), "CLI exposes --replan on resume");
 }
 
 int main(int argc, char** argv) {

@@ -97,6 +97,11 @@ struct CrewOptions {
     // disk — not the other fields here — is the source of truth for the task,
     // focus, and per-coder prompts/models.
     QString resumeRunId;
+
+    // Resume, but have the Director decompose the task AGAIN instead of replaying
+    // the saved plan: same run identity and research, a fresh subtask breakdown,
+    // every coder re-run. Only meaningful together with resumeRunId.
+    bool replan = false;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI

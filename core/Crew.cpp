@@ -116,23 +116,27 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     Result out;
     const QString projectRoot = QDir::currentPath();
     const bool resuming = !opts.resumeRunId.isEmpty();
+    // --replan keeps the run's identity and research but has the Director rebuild
+    // the plan from scratch, so the "load subtasks from disk" path is bypassed.
+    const bool replan = resuming && opts.replan;
     const QString runId = resuming ? opts.resumeRunId : newRunId();
     out.runId = runId;
 
     // On resume the plan — task, focus, land mode, and every coder's prompt/model
     // — is read back from disk, because `opts` may be bare (the user just typed
     // `crew resume`). A missing plan.json means the interrupted run never got past
-    // the Director, so there is nothing to resume.
+    // the Director; there is nothing to replay (but --replan can still rebuild it
+    // as long as the saved task survives).
     const QJsonObject plan = resuming ? readPlan(runId) : QJsonObject{};
-    if (resuming && plan.isEmpty()) {
+    if (resuming && plan.isEmpty() && (!replan || plan.value("task").toString().isEmpty())) {
         if (ev.onPhase) ev.onPhase("error", "nothing to resume for " + runId);
         return out;
     }
-    const QString task = resuming ? plan.value("task").toString() : opts.task;
-    const QString focus = resuming ? plan.value("focus").toString() : opts.focus;
+    const QString task = resuming ? plan.value("task").toString(opts.task) : opts.task;
+    const QString focus = resuming ? plan.value("focus").toString(opts.focus) : opts.focus;
     const QString landMode = resuming ? plan.value("land").toString(opts.land) : opts.land;
-    const bool doAudit = resuming ? plan.value("audit").toBool(true) : opts.audit;
-    const bool doLearn = resuming ? plan.value("learn").toBool(false) : opts.learn;
+    const bool doAudit = resuming ? plan.value("audit").toBool(opts.audit) : opts.audit;
+    const bool doLearn = resuming ? plan.value("learn").toBool(opts.learn) : opts.learn;
 
     const QString sessionBackend = Config::str("model.backend", "ollama");
     const QString sessionModel = Config::str("ollama.defaultModel", "");
@@ -209,7 +213,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const int cap = opts.swarmMax > 0 ? qMin(opts.swarmMax, 64) : 8;
     const int maxCoders = qBound(1, opts.maxCoders, cap);
     QVector<Subtask> subs;
-    if (resuming) {
+    if (resuming && !replan) {
         // The saved plan carries each coder's prompt/model; current.json carries
         // its last live state. A coder that reached "done" or "held" is complete
         // (landed, or already awaiting a human on the board) and is NOT re-run;
@@ -250,8 +254,8 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         // The Director can only assign a role it knows exists; an invented one
         // falls back to 'coder' in CrewRoles::get().
         sys += "\n\nAssign each subtask the most fitting role:\n" + CrewRoles::catalog();
-        QString usr = "Task: " + opts.task;
-        if (!opts.focus.isEmpty()) usr += "\nFocus: " + opts.focus;
+        QString usr = "Task: " + task;
+        if (!focus.isEmpty()) usr += "\nFocus: " + focus;
         if (!research.isEmpty()) usr += "\n\nResearch findings:\n" + research.left(6000);
 
         auto backend = Backends::get(d.backendId());
@@ -325,7 +329,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // Persist the plan the moment it exists (fresh runs only — on resume it is
     // already on disk). From here on an interruption is recoverable: plan.json has
     // the prompts, current.json has the live state.
-    if (!resuming) writePlan(runId, task, focus, landMode, doAudit, doLearn, subs);
+    if (!resuming || replan) writePlan(runId, task, focus, landMode, doAudit, doLearn, subs);
 
     // Always show who is doing what on which model — the "different models for
     // different parts" view, whether they were routed or set by hand.
