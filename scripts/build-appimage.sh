@@ -5,8 +5,8 @@
 #
 # GLIBC FLOOR: an AppImage cannot bundle glibc (the bundled loader would have to
 # match the host kernel/NSS), so the oldest system it runs on is the one it was
-# BUILT on. Ubuntu 22.04 / Mint 21 (glibc 2.35) is the floor we ship, which is
-# why .github/workflows/ci.yml builds the release AppImage on ubuntu-22.04.
+# BUILT on. Ubuntu 24.04 / Mint 22 (glibc 2.39) is the floor we ship, which is
+# why .github/workflows/ci.yml builds the release AppImage on ubuntu-24.04.
 # Building on a newer distro produces a working AppImage that simply refuses to
 # start on older ones; the script prints the floor it actually achieved so this
 # is never a silent surprise.
@@ -16,6 +16,7 @@ set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
+mkdir -p "$ROOT/.build"
 BUILD="$ROOT/.build/appimage"
 APPDIR="$ROOT/.build/AppDir"
 DIST="$ROOT/dist"
@@ -198,9 +199,9 @@ FLOOR="$(objdump -T "$APPDIR/usr/bin/ollamadev-ade" "$APPDIR"/usr/lib/*.so* 2>/d
   | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)"
 echo "▸ glibc floor: ${FLOOR:-unknown} (runs on any host with glibc >= ${FLOOR:-?})"
 case "$FLOOR" in
-  2.3[0-5]|2.[12][0-9]) : ;;  # 2.35 or older — Ubuntu 22.04 / Mint 21 and up
-  *) echo "  ⚠ built on a newer glibc than the 2.35 floor we ship — this AppImage"
-     echo "    will NOT start on Ubuntu 22.04 / Mint 21. Build it on ubuntu-22.04"
+  2.3[0-9]|2.[12][0-9]) : ;;  # 2.39 or older — Ubuntu 24.04 / Mint 22 and up
+  *) echo "  ⚠ built on a newer glibc than the 2.39 floor we ship — this AppImage"
+     echo "    will NOT start on Ubuntu 24.04 / Mint 22. Build it on ubuntu-24.04"
      echo "    (that is what CI does) for a release artifact." ;;
 esac
 

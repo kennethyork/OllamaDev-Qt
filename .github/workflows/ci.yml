@@ -17,9 +17,9 @@ on:
 jobs:
   build:
     # 22.04 is not just "an LTS": it is the glibc floor (2.35) the project ships
-    # against, so the AppImage produced here runs on Ubuntu 22.04 / Mint 21 and
+    # against, so the AppImage produced here runs on Ubuntu 24.04 / Mint 22 and
     # everything newer. Building on ubuntu-latest would silently raise that floor.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
   # install it that way, and a stray Qt6::Widgets include in core/ would break
   # them without this job noticing.
   cli-only:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +68,7 @@ jobs:
 
   appimage:
     needs: build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -112,7 +112,7 @@ jobs:
     # green, so a release artifact that never passed the suite is impossible.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [build, cli-only, appimage]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
