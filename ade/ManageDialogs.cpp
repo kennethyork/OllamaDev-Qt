@@ -406,7 +406,7 @@ void openReview(PaneHost& host) {
     auto* view = new QTextEdit;
     view->setReadOnly(true);
     view->setLineWrapMode(QTextEdit::NoWrap);
-    view->setFont(Theme::withEmoji(QFontDatabase::systemFont(QFontDatabase::FixedFont)));
+    view->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     v->addWidget(view, 1);
 
     auto* row = new QHBoxLayout;

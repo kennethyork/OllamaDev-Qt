@@ -1,6 +1,4 @@
 #include <QApplication>
-#include <QFont>
-#include <QFontDatabase>
 
 #include "Config.h"
 #include "MainWindow.h"
@@ -12,9 +10,6 @@ int main(int argc, char** argv) {
     QCoreApplication::setOrganizationName("OllamaDev");
     QCoreApplication::setApplicationName("OllamaDev ADE");
 
-    // The UI is full of emoji (  ) and every one of them was a tofu box. See
-    // Theme::withEmoji — Qt does not fall back to a colour emoji font on its own.
-    app.setFont(odv::Theme::withEmoji(app.font()));
 
     odv::Config::load();
     odv::Tools::registerAll();

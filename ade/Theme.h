@@ -1,6 +1,5 @@
 #pragma once
 #include <QColor>
-#include <QFont>
 #include <QString>
 #include <QStringList>
 
@@ -28,18 +27,6 @@ public:
     static Colors currentColors();
     static void apply(QApplication* app, const QString& name);
 
-    // The same font, with an emoji font behind it in the family list.
-    //
-    // Qt does not fall back to a colour-bitmap emoji font on its own — least of all
-    // for BOLD text, because Noto Color Emoji ships no bold face and the match
-    // simply fails. So every emoji in the UI (pane titles, the Add menu, the
-    // palette, and any emoji in a file you open) rendered as a tofu box. Qt walks a
-    // family list per character, so the text stays in the requested font and only
-    // the emoji come from the emoji font.
-    //
-    // Use this ANYWHERE a font is set by hand — a monospace editor font included,
-    // which is how the tofu got into the editor after the app font was fixed.
-    static QFont withEmoji(QFont f);
 
     // Live preview for the theme editor: paint an ARBITRARY palette without
     // persisting it as "the current theme". apply() is this plus setCurrent().

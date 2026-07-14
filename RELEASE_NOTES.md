@@ -15,7 +15,7 @@ on one model.
 - `ollamadev route [--run] "…"` — show (or run) which model the brain picks, and why.
 - `ollamadev crew "…" --route` — auto-assign every role's model. The Director and Auditor reason
   *hard*, the Researcher *moderate*, and each coder is routed on *its own subtask's* difficulty.
-- The desktop **🧠 Brain** pane visualises the whole thing: all 14 crew faculties
+- The desktop ** Brain** pane visualises the whole thing: all 14 crew faculties
   (Researcher → Router → Director → Roles → Skills → Coders → Auditor → Debate/Dedupe/Security →
   Secret gate → Overlap guard → Landing → Memory), a live classifier you type into, the running
   crew's routed model plan, and the token split.
