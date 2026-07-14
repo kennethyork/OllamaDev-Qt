@@ -33,8 +33,16 @@ set_target_properties(ollamadev-ade PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDL
 # (large, Chromium-based) WebEngine module still builds and runs. On by default;
 # turn off with -DODV_WEBENGINE=OFF for a lean build.
 option(ODV_WEBENGINE "Use QtWebEngine for the Browser pane" ON)
+# When a release build MUST have the real browser, this makes a missing WebEngine
+# a hard error rather than a silent reader fallback — so a reader-only artifact can
+# never ship by accident.
+option(ODV_WEBENGINE_REQUIRED "Fail the build if QtWebEngine is not found" OFF)
 if(ODV_WEBENGINE)
-    find_package(Qt6 COMPONENTS WebEngineWidgets QUIET)
+    if(ODV_WEBENGINE_REQUIRED)
+        find_package(Qt6 REQUIRED COMPONENTS WebEngineWidgets)
+    else()
+        find_package(Qt6 COMPONENTS WebEngineWidgets QUIET)
+    endif()
     if(Qt6WebEngineWidgets_FOUND)
         target_link_libraries(ollamadev-ade PRIVATE Qt6::WebEngineWidgets)
         target_compile_definitions(ollamadev-ade PRIVATE ODV_HAS_WEBENGINE=1)

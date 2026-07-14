@@ -38,8 +38,16 @@ echo "▸ building…"
 # The AppImage is self-contained — it cannot borrow the host's engine like the
 # deb/rpm do — so it bundles the full QtWebEngine browser (Chromium). That is the
 # ~90 MB the size comes from; it buys a real browser on any machine.
-cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DODV_BUILD_ADE=ON \
-      -DODV_WEBENGINE=ON >/dev/null
+# ODV_WEBENGINE_REQUIRED makes find_package(WebEngineWidgets) hard-fail instead of
+# quietly falling back to the reader — so this can NEVER silently ship a
+# reader-only AppImage when we asked for the full browser.
+if ! cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DODV_BUILD_ADE=ON \
+           -DODV_WEBENGINE=ON -DODV_WEBENGINE_REQUIRED=ON > "$ROOT/.build/cfg.log" 2>&1; then
+  echo "✗ configure failed — the full browser needs QtWebEngine. Missing dep:" >&2
+  grep -iE 'webengine|could not find|error' "$ROOT/.build/cfg.log" | head -6 >&2
+  exit 1
+fi
+grep -iE 'browser pane' "$ROOT/.build/cfg.log" || true
 cmake --build "$BUILD" -j"$JOBS" >/dev/null
 
 # 2. Lay out the AppDir. This clears $ROOT/.build/AppDir — a staging directory
@@ -214,7 +222,9 @@ rm -f "$OUT"
 # single reduction on the WebEngine build comes from. Never strip in place blindly;
 # --strip-unneeded keeps what the dynamic linker needs.
 echo "▸ stripping…"
-find "$APPDIR/usr/lib" "$APPDIR/usr/bin" "$APPDIR/usr/libexec" -type f 2>/dev/null | while read -r f; do
+# usr/libexec only exists on a WebEngine build; find over a missing dir aborts the
+# whole script under `set -e`, so walk usr/ once and skip non-ELF.
+find "$APPDIR/usr" -type f 2>/dev/null | while read -r f; do
   case "$(file -b "$f" 2>/dev/null)" in
     *ELF*) strip --strip-unneeded "$f" 2>/dev/null || true ;;
   esac
