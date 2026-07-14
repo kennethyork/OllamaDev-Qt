@@ -8,6 +8,9 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QAbstractScrollArea>
+#include <QGraphicsProxyWidget>
+#include <QCoreApplication>
 #include <QWheelEvent>
 #include <cmath>
 #include <utility>
@@ -265,8 +268,34 @@ void Canvas::wheelEvent(QWheelEvent* e) {
         e->accept();
         return;
     }
-    // A plain wheel belongs to whatever is under the cursor (a terminal's
-    // scrollback, the editor); over empty canvas the view scrolls, which pans.
+
+    // A plain wheel should scroll the content of the pane under the cursor. Qt's
+    // default QGraphicsProxyWidget forwarding hands the event to the deepest child
+    // widget but does NOT propagate an ignored wheel up to the enclosing scroll
+    // area's viewport — so lists, editors and text views inside a pane never
+    // scroll. Do it ourselves: locate the QAbstractScrollArea under the cursor and
+    // send the wheel straight to its viewport.
+    const QPointF scenePos = mapToScene(e->position().toPoint());
+    const auto items = scene() ? scene()->items(scenePos) : QList<QGraphicsItem*>{};
+    for (QGraphicsItem* it : items) {
+        auto* proxy = qgraphicsitem_cast<QGraphicsProxyWidget*>(it);
+        if (!proxy || !proxy->widget()) continue;
+        const QPoint local = proxy->mapFromScene(scenePos).toPoint();
+        QWidget* w = proxy->widget()->childAt(local);
+        for (QWidget* p = w; p; p = p->parentWidget()) {
+            auto* sa = qobject_cast<QAbstractScrollArea*>(p);
+            if (!sa) continue;
+            QWidget* vp = sa->viewport();
+            const QPoint vpLocal = vp->mapFrom(proxy->widget(), local);
+            QWheelEvent copy(vpLocal, e->globalPosition(), e->pixelDelta(), e->angleDelta(),
+                             e->buttons(), e->modifiers(), e->phase(), e->inverted(),
+                             e->source());
+            QCoreApplication::sendEvent(vp, &copy);
+            e->accept();
+            return;
+        }
+    }
+    // No scroll area (a terminal handles its own wheel; empty canvas pans).
     QGraphicsView::wheelEvent(e);
 }
 
