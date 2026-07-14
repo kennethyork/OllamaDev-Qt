@@ -188,4 +188,14 @@ terminals (no libvterm, no QTermWidget).
 | `ODV_BUILD_ADE` | `ON` | `OFF` gives a headless CLI-only build that needs no GUI Qt packages. |
 | `ODV_WEBENGINE` | `ON` | QtWebEngine browser pane; falls back to a reader if absent. |
 
-MIT.
+---
+
+## Licence
+
+**[AGPL-3.0](LICENSE).** Free to use, study, modify and share.
+
+The one thing it asks in return: if you modify OllamaDev and let other people use it — including
+**over a network, as a hosted service** — you have to offer them your modified source too. Running it
+on your own machine, for your own work, carries no obligation at all.
+
+If that does not suit you, ask me about a different licence.
