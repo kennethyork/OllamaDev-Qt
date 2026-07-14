@@ -3,8 +3,7 @@
 
 namespace odv {
 
-// Registered in Panes.cpp. STUB — replace the factory body in TopologyPane.cpp
-// with the real pane (port of the PHP "Crew topology" view).
+// Registered in Panes.cpp.
 PaneSpec makeTopologyPaneSpec();
 
 }  // namespace odv

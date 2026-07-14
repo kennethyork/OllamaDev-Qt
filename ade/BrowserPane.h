@@ -3,8 +3,7 @@
 
 namespace odv {
 
-// Registered in Panes.cpp. STUB — replace the factory body in BrowserPane.cpp
-// with the real pane (port of the PHP "Browser" view).
+// Registered in Panes.cpp.
 PaneSpec makeBrowserPaneSpec();
 
 }  // namespace odv

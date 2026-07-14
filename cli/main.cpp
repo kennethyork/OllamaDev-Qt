@@ -150,6 +150,7 @@ void printHelp() {
           << "    --swarm N                  raise the coder cap for a bigger fan-out\n"
           << "    --amplify N                N Director plans (keep the modal one) + an\n"
           << "                               N-reviewer audit panel — majority rules\n"
+          << "    --learn                    remember what this run teaches, for the next one\n"
           << "    --pack <name>              start from a saved team; your flags still win\n"
           << "  ollamadev route [--run] \"…\"  show (or run) which model the brain picks\n\n"
           << "Context:\n"
@@ -358,6 +359,10 @@ int cmdCrew(const QStringList& args) {
     o.route = flagOr("--route", "route");    // auto-pick each role's model by difficulty
     o.debate = flagOr("--debate", "debate");  // advocate/skeptic/judge per changeset
     o.dedupe = flagOr("--dedupe", "dedupe");  // hold coders whose work duplicates another's
+    // The learning loop. It was implemented in Crew.cpp, advertised in the release
+    // notes, and appended by the desktop's crew dialog — and NEVER PARSED HERE, so
+    // the flag did nothing and the desktop checkbox was a no-op.
+    o.learn = flagOr("--learn", "learn");
     o.security = hasFlag(args, "--security"); // read-only vulnerability scan (no code changes)
     o.swarmMax = flagValue(args, "--swarm", "0").toInt();  // raise the coder cap
     // N-sample self-consistency: N Director plans (keep the modal one) + an
@@ -1650,6 +1655,7 @@ int cmdCrewPack(const QStringList& args) {
         if (hasFlag(args, "--route")) pack.insert("route", true);
         if (hasFlag(args, "--debate")) pack.insert("debate", true);
         if (hasFlag(args, "--dedupe")) pack.insert("dedupe", true);
+        if (hasFlag(args, "--learn")) pack.insert("learn", true);
 
         const QString path = CrewPacks::save(name, pack);
         if (path.isEmpty()) {

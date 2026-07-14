@@ -3,8 +3,7 @@
 
 namespace odv {
 
-// Registered in Panes.cpp. STUB — replace the factory body in StartPane.cpp
-// with the real pane (port of the PHP "Start" view).
+// Registered in Panes.cpp.
 PaneSpec makeStartPaneSpec();
 
 }  // namespace odv

@@ -264,8 +264,8 @@ private:
             (Models::isCloud(it.key()) ? cloud : local) += it.value().total();
         const qint64 total = local + cloud;
         tokens_->setText(total > 0
-                             ? tr("<b>Tokens:</b> %1 · <span style='color:%2'>%3%% free "
-                                  "local</span> · %4%% cloud")
+                             ? tr("<b>Tokens:</b> %1 · <span style='color:%2'>%3% free "
+                                  "local</span> · %4% cloud")
                                    .arg(total)
                                    .arg(c.ok.name())
                                    .arg(local * 100 / total)

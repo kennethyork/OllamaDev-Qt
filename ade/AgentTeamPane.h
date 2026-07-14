@@ -3,8 +3,7 @@
 
 namespace odv {
 
-// Registered in Panes.cpp. STUB — replace the factory body in AgentTeamPane.cpp
-// with the real pane (port of the PHP "Agent team" view).
+// Registered in Panes.cpp.
 PaneSpec makeAgentTeamPaneSpec();
 
 }  // namespace odv

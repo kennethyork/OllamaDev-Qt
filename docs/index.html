@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OllamaDev — a local AI coding agent on an infinite canvas</title>
+<meta name="description" content="A local-first AI coding agent. A crew of models works in parallel git worktrees, an auditor reads every diff, and nothing leaves your machine. Ollama-native, Qt-only, open source.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d1117'/><circle cx='50' cy='50' r='22' fill='none' stroke='%234fc3f7' stroke-width='6'/></svg>">
+<style>
+  :root{
+    --bg:#0b0e14; --bg2:#11151d; --elev:#161b26; --line:#232936;
+    --fg:#e6edf3; --dim:#9aa7b8; --faint:#5d6b7f;
+    --accent:#4fc3f7; --ok:#81c784; --warn:#ffb74d; --err:#e57373;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1000px; margin:0 auto; padding:0 24px}
+
+  /* the dot lattice, same idea as the app's canvas */
+  .hero{
+    padding:88px 0 64px; text-align:center; position:relative; overflow:hidden;
+    background:
+      radial-gradient(circle at 1px 1px, #1c2331 1px, transparent 0) 0 0/26px 26px,
+      radial-gradient(ellipse 70% 60% at 50% 0%, rgba(79,195,247,.09), transparent 70%);
+    border-bottom:1px solid var(--line);
+  }
+  .tag{
+    display:inline-block; font:600 12px/1 var(--mono); letter-spacing:.12em;
+    text-transform:uppercase; color:var(--accent);
+    border:1px solid #24384a; background:#0f1b24; padding:7px 12px; border-radius:999px;
+    margin-bottom:22px;
+  }
+  h1{font-size:clamp(34px,5.4vw,54px); line-height:1.1; margin:0 0 18px; letter-spacing:-.02em}
+  h1 em{font-style:normal; color:var(--accent)}
+  .sub{font-size:clamp(17px,2.2vw,20px); color:var(--dim); max-width:660px; margin:0 auto 30px}
+  .cta{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-bottom:14px}
+  .btn{
+    display:inline-block; padding:12px 22px; border-radius:9px; font-weight:600; font-size:15px;
+    border:1px solid var(--line); background:var(--elev); color:var(--fg);
+  }
+  .btn:hover{border-color:var(--accent); text-decoration:none}
+  .btn.p{background:var(--accent); color:#06121a; border-color:var(--accent)}
+  .btn.p:hover{filter:brightness(1.1)}
+  .note{color:var(--faint); font-size:13px}
+
+  section{padding:74px 0; border-bottom:1px solid var(--line)}
+  h2{font-size:30px; margin:0 0 12px; letter-spacing:-.01em}
+  .lead{color:var(--dim); max-width:660px; margin:0 0 34px}
+
+  .shot{
+    border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    background:var(--bg2); box-shadow:0 18px 50px rgba(0,0,0,.5); margin:32px 0 8px;
+  }
+  .shot img{display:block; width:100%}
+  .cap{color:var(--faint); font-size:13px; text-align:center; margin-bottom:8px}
+
+  .grid{display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
+  .card{background:var(--bg2); border:1px solid var(--line); border-radius:11px; padding:20px 22px}
+  .card h3{margin:0 0 7px; font-size:16px}
+  .card p{margin:0; color:var(--dim); font-size:14.5px}
+  .card .k{color:var(--accent); font:600 11px/1 var(--mono); letter-spacing:.1em;
+           text-transform:uppercase; display:block; margin-bottom:9px}
+
+  pre{
+    background:#080b10; border:1px solid var(--line); border-radius:10px;
+    padding:18px 20px; overflow-x:auto; font:13.5px/1.65 var(--mono); color:#cfe3f2;
+  }
+  code{font-family:var(--mono); font-size:.92em}
+  p code,li code,td code{background:var(--elev); border:1px solid var(--line);
+    padding:1px 6px; border-radius:5px; color:#bcd9ec}
+  .c{color:var(--faint)}
+  .g{color:var(--ok)}
+
+  table{width:100%; border-collapse:collapse; font-size:14.5px; margin-top:8px}
+  th,td{text-align:left; padding:11px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{color:var(--faint); font:600 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase}
+  td:first-child{white-space:nowrap}
+  .y{color:var(--ok); font-weight:700}
+  .n{color:var(--faint)}
+
+  footer{padding:44px 0 60px; color:var(--faint); font-size:14px; text-align:center}
+  .honest{
+    background:#12100b; border:1px solid #3a3016; border-left:3px solid var(--warn);
+    border-radius:9px; padding:18px 22px; color:var(--dim); font-size:14.5px;
+  }
+  .honest strong{color:var(--warn)}
+  @media (max-width:640px){ section{padding:54px 0} td:first-child{white-space:normal} }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">Local-first · Ollama-native · Open source</span>
+    <h1>A crew of models that codes<br>while <em>nothing leaves your machine</em></h1>
+    <p class="sub">
+      OllamaDev is an agentic development environment. A Director plans the work, several coders
+      build it in parallel — each in its own git worktree — and an Auditor reads every diff before
+      any of it touches your files.
+    </p>
+    <div class="cta">
+      <a class="btn p" href="#install">Install</a>
+      <a class="btn" href="https://github.com/kennethyork/OllamaDev-Qt">GitHub</a>
+      <a class="btn" href="#docs">Docs</a>
+    </div>
+    <p class="note">C++20 / Qt6 · Linux · free and open source · no account, no telemetry, no credits</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>An infinite canvas, not a grid of boxes</h2>
+    <p class="lead">
+      Terminals, editors, chats, the crew, git — floating windows on a pannable, zoomable canvas.
+      Put things where they make sense and leave them there.
+    </p>
+    <div class="shot"><img src="img/canvas.png" alt="The OllamaDev canvas: the crew's brain pane, a chat pane, a terminal, and the overview map"></div>
+    <p class="cap">The Brain pane (the whole crew pipeline), a chat pane, a terminal — and the overview map, bottom left.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The crew</h2>
+    <p class="lead">
+      One command. A Director decomposes the task, coders build the pieces in parallel, an Auditor
+      reviews every changeset, and clean work lands in your folder. Contested work waits for you.
+    </p>
+<pre><span class="c"># plan it, build it in parallel, audit it, land it</span>
+$ ollamadev crew <span class="g">"add rate limiting to the API and document it"</span>
+
+▸ plan: director is decomposing the task
+    coder #1 [coder] ollama:gpt-oss:120b-cloud · hard
+    coder #2 [docs]  ollama:gpt-oss:20b-cloud  · moderate
+▸ build: 2 coders working
+▸ audit: reviewing every changeset
+▸ land: applying clean work
+    applied #1 (2 files)
+    held    #2 — audit flagged: adds code beyond the docs-only subtask
+▸ done: 1 applied · 1 held</pre>
+
+    <div class="grid" style="margin-top:30px">
+      <div class="card">
+        <span class="k">Isolated</span>
+        <h3>A git worktree per coder</h3>
+        <p>Real worktrees sharing the object store — not copies of your repo. Each coder gets a real
+           git repo it can read the history of, and your working tree is never touched until you accept.</p>
+      </div>
+      <div class="card">
+        <span class="k">Reviewed</span>
+        <h3>An Auditor that says no</h3>
+        <p>Every changeset is read before it lands. Wrong, unsafe, or outside the subtask it was given
+           — it gets held for you instead of applied.</p>
+      </div>
+      <div class="card">
+        <span class="k">Gated</span>
+        <h3>A secret never lands</h3>
+        <p>A credential in a diff blocks the landing and blocks the commit. Findings are redacted, so
+           the secret is never echoed into a log or a model's context.</p>
+      </div>
+      <div class="card">
+        <span class="k">Resumable</span>
+        <h3>Interrupted is not lost</h3>
+        <p><code>crew resume</code> keeps every coder that finished — landing their work from disk with
+           zero model calls — and the Director re-plans only what is left.</p>
+      </div>
+      <div class="card">
+        <span class="k">Steerable</span>
+        <h3>Talk to a running coder</h3>
+        <p><code>crew steer 2 "use the existing logger"</code> — it arrives between iterations and
+           changes what that coder does next.</p>
+      </div>
+      <div class="card">
+        <span class="k">Guarded</span>
+        <h3>First writer wins</h3>
+        <p>Two coders touching the same file is caught, not merged blindly. The second one is held
+           for you to look at.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The brain</h2>
+    <p class="lead">
+      Difficulty is a property of the <em>subtask</em>, not the role. With <code>--route</code>, each
+      piece of work is classified and given a model that fits it — so "rename a variable" doesn't cost
+      what "design the parser" costs.
+    </p>
+<pre>$ ollamadev route <span class="g">"rename a variable"</span>
+→ simple    ollama:qwen3.5:9b        <span class="c">(short lookup-style question)</span>
+
+$ ollamadev route <span class="g">"design a lock-free queue"</span>
+→ hard      ollama:gpt-oss:120b-cloud</pre>
+    <p class="lead" style="margin-top:26px">All opt-in. With none of these set, the crew is exactly as it was.</p>
+    <table>
+      <tr><th>Flag</th><th>What it does</th></tr>
+      <tr><td><code>--route</code></td><td>Pick each subtask's model by difficulty.</td></tr>
+      <tr><td><code>--amplify N</code></td><td>N independent Director plans, keep the consensus shape — and an N-reviewer audit panel where a strict majority is needed to land anything. A 2–2 split holds the change.</td></tr>
+      <tr><td><code>--debate</code></td><td>Advocate vs skeptic vs judge, per changeset. A contested change has to survive an argument.</td></tr>
+      <tr><td><code>--dedupe</code></td><td>Hold a coder whose work duplicates another's.</td></tr>
+      <tr><td><code>--security</code></td><td>A read-only vulnerability hunt. The crew writes a report and changes nothing.</td></tr>
+      <tr><td><code>--learn</code></td><td>Distil what this run taught into memory and a reusable skill, and load it back on the next run.</td></tr>
+      <tr><td><code>--swarm N</code></td><td>Raise the coder cap for a wider fan-out.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Git, properly</h2>
+    <p class="lead">
+      A real git client on the canvas: the commit graph, staged and unstaged changes, an inline diff —
+      and an interactive rebase where the model proposes the plan and you approve every line of it.
+    </p>
+    <div class="shot"><img src="img/git.png" alt="The git pane: commit graph with lanes, branches, stashes, tags, staged and unstaged changes"></div>
+
+    <div class="grid" style="margin-top:26px">
+      <div class="card">
+        <span class="k">Tidy history</span>
+        <h3>AI interactive rebase</h3>
+        <p>The model reads your commits and proposes which to fold together and which to reword. You see
+           every line before anything is rewritten, and a backup ref is taken first — so it is always
+           undoable.</p>
+      </div>
+      <div class="card">
+        <span class="k">Commit</span>
+        <h3>Messages that say why</h3>
+        <p>A Conventional Commit written from the staged diff — on a dedicated <code>git.model</code>,
+           because a commit message is a small job that shouldn't cost what chat costs.</p>
+      </div>
+      <div class="card">
+        <span class="k">Safety</span>
+        <h3>It tells you before it eats your work</h3>
+        <p>Every destructive action names what it will destroy. Force-push is always
+           <code>--force-with-lease</code>. Unstage never means "delete my edit".</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Everything else</h2>
+    <div class="grid">
+      <div class="card"><span class="k">Agent</span><h3>47 built-in tools</h3>
+        <p>Read, write, edit, patch, glob, grep, bash, background shells, semantic code search, the
+           web — and 17 <code>git_*</code> tools. Native Ollama function calling, no text-scraping fallback.</p></div>
+      <div class="card"><span class="k">Editors</span><h3>ACP + LSP</h3>
+        <p>An Agent Client Protocol server, so an editor can drive it as an agent — permission prompts
+           and all. And a language server: hover, completion, go-to-definition, rename, real
+           compiler-backed diagnostics.</p></div>
+      <div class="card"><span class="k">Providers</span><h3>Ollama, and every coding CLI</h3>
+        <p>Ollama local <em>and</em> cloud, plus Claude Code, Codex, Gemini, cursor-agent, opencode,
+           qwen. Mix providers inside one crew — a different backend per coder.</p></div>
+      <div class="card"><span class="k">Vision</span><h3>Show it a screenshot</h3>
+        <p><code>@shot.png</code> in any prompt. Works in the CLI, the one-shot, and the desktop chat.</p></div>
+      <div class="card"><span class="k">Extend</span><h3>Skills, memory, MCP, plugins</h3>
+        <p>Progressive-disclosure skills, wiki-linked memory, MCP servers, and plugins that contribute
+           skills, commands, hooks and MCP servers — installed disabled, and enabling shows you the
+           exact commands first.</p></div>
+      <div class="card"><span class="k">Voice</span><h3>Say it instead</h3>
+        <p>Local speech-to-text. Steer the crew without typing.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lead">Qt6 is the only dependency. There is no account, no key, and nothing to sign up for.</p>
+<pre><span class="c"># Debian / Ubuntu</span>
+$ sudo apt install build-essential cmake ninja-build qt6-base-dev \
+      qt6-webengine-dev libqt6svg6-dev
+
+$ git clone https://github.com/kennethyork/OllamaDev-Qt.git
+$ cd OllamaDev-Qt
+$ ./install.sh          <span class="c"># builds, tests, installs the CLI + desktop app</span>
+
+$ ollamadev setup       <span class="c"># picks and pulls a model for your hardware</span>
+$ ollamadev doctor      <span class="c"># check it over</span></pre>
+    <p class="lead" style="margin-top:22px">
+      You need <a href="https://ollama.com">Ollama</a> running. Cloud models work through
+      <em>your own</em> <code>ollama signin</code> — there are no API keys in this app, and nothing is
+      routed through anyone else's account.
+    </p>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="wrap">
+    <h2>The commands you'll actually use</h2>
+    <table>
+      <tr><th>Command</th><th></th></tr>
+      <tr><td><code>ollamadev</code></td><td>Interactive agent. <code>-c</code> resumes this folder's session.</td></tr>
+      <tr><td><code>ollamadev "…"</code></td><td>One-shot. It reads, edits, runs — then stops.</td></tr>
+      <tr><td><code>ollamadev crew "…"</code></td><td>The parallel bench: plan → build → audit → land.</td></tr>
+      <tr><td><code>ollamadev crew resume</code></td><td>Finish an interrupted run. Keeps what's done.</td></tr>
+      <tr><td><code>ollamadev board</code></td><td>Held work, waiting on you. <code>crew accept 2</code> / <code>crew discard 2</code>.</td></tr>
+      <tr><td><code>ollamadev commit -a</code></td><td>AI commit message. A leaked secret blocks it.</td></tr>
+      <tr><td><code>ollamadev ship</code></td><td>Stage → scan → commit → ask → push.</td></tr>
+      <tr><td><code>ollamadev tidy 10</code></td><td>AI interactive rebase over the last 10 commits.</td></tr>
+      <tr><td><code>ollamadev scan</code></td><td>Hunt the tree for leaked credentials.</td></tr>
+      <tr><td><code>ollamadev route "…"</code></td><td>Which model would the brain pick, and why.</td></tr>
+      <tr><td><code>ollamadev code-search "…"</code></td><td>Search the repo by meaning, not by string.</td></tr>
+      <tr><td><code>ollamadev eval</code></td><td>A fixed task suite → a pass rate you can compare models with.</td></tr>
+      <tr><td><code>ollamadev acp</code> / <code>lsp</code></td><td>Serve an editor over ACP, or as a language server.</td></tr>
+      <tr><td><code>ollamadev-ade</code></td><td>The desktop app.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What it is, and what it isn't</h2>
+    <div class="honest">
+      <p style="margin-top:0"><strong>Being straight with you.</strong> This is a real tool that does
+      real work, but it is early and it is one person's project.</p>
+      <ul style="margin-bottom:0">
+        <li><strong>Linux only</strong> today. The code is Qt6 and should port to macOS and Windows,
+            but neither is built or tested. Do not assume it works there.</li>
+        <li><strong>Build from source.</strong> No signed installers yet.</li>
+        <li><strong>205 assertions</strong> in the self-test suite, all passing — <code>install.sh</code> runs them
+            on every build. Every feature on this page was driven end-to-end against a live model
+            before it was written down. But it has one user.</li>
+        <li><strong>Not a hosted product.</strong> No account, no telemetry, no credits, nothing to bill
+            you for — and equally, nobody on call if it breaks.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/kennethyork/OllamaDev-Qt">GitHub</a> ·
+      <a href="https://github.com/kennethyork/OllamaDev-Qt/releases">Releases</a> ·
+      <a href="https://github.com/kennethyork/OllamaDev-Qt/issues">Issues</a>
+    </p>
+    <p>C++20 · Qt6 · MIT. Your code stays on your machine.</p>
+  </div>
+</footer>
+
+</body>
+</html>

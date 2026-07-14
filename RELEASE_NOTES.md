@@ -4,7 +4,7 @@ A C++20 / Qt6 rewrite of [OllamaDev](https://github.com/kennethyork/OllamaDev). 
 from one engine: **`ollamadev`** (the CLI) and **`ollamadev-ade`** (the desktop app — infinite
 canvas, native terminals, crew board). Qt is the only dependency.
 
-Broad and tested — 36 self-tests, every feature verified end-to-end. See "Known gaps" at the
+Broad and tested — 205 assertions in the self-test suite, every feature verified end-to-end. See "Known gaps" at the
 bottom for what is deliberately out of scope in this release.
 
 ## What's new since v0.1.0

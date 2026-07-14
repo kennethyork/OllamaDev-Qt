@@ -3,8 +3,7 @@
 
 namespace odv {
 
-// Registered in Panes.cpp. STUB — replace the factory body in TasksPane.cpp
-// with the real pane (port of the PHP "▦ Tasks" view).
+// Registered in Panes.cpp.
 PaneSpec makeTasksPaneSpec();
 
 }  // namespace odv

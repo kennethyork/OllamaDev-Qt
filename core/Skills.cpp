@@ -1465,7 +1465,7 @@ QStringList CrewPacks::keys() {
             // you stop having to retype. Anything NOT in this list is dropped on
             // save — every key here must also be read back by `crew --pack`.
             QStringLiteral("route"),           QStringLiteral("debate"),
-            QStringLiteral("dedupe")};
+            QStringLiteral("dedupe"),          QStringLiteral("learn")};
 }
 
 QJsonObject CrewPacks::builtins() {
