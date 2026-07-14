@@ -12,6 +12,10 @@ struct Finding {
     QString severity;  // high|med|low
     int line = 0;
     QString redacted;
+    // Which file it is in. Only set by scanTree — a diff or a text scan already
+    // knows what it was looking at, but a tree scan's finding is meaningless
+    // without it ("line 4" of WHAT?).
+    QString file;
 };
 
 // SECSCAN — dependency-free secret + unsafe-sink scanner. Catches hardcoded
@@ -33,6 +37,18 @@ public:
     // Skips binaries and very large files — neither is where a leaked key lives,
     // and both would only slow the commit gate down.
     static QVector<Finding> scanFile(const QString& path);
+
+    // Every file under `dir`, recursively. `files` (when given) receives how many
+    // were actually READ — which is the number that makes "clean" mean something.
+    //
+    // This exists because `ollamadev scan` with no argument defaults to the current
+    // DIRECTORY, scanFile() only accepts a file, and so the natural way to run the
+    // scanner examined nothing and printed "clean". A security tool that reports an
+    // all-clear on a scan it never performed is worse than no security tool.
+    //
+    // Skips the places secrets are not and noise is: .git, node_modules, build
+    // trees, vendored dependencies.
+    static QVector<Finding> scanTree(const QString& dir, int* files = nullptr);
 };
 
 }  // namespace odv

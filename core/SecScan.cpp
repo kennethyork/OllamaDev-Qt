@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QFile>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QStringList>
@@ -157,6 +158,59 @@ QVector<Finding> SecScan::scanFile(const QString& path) {
     if (data.left(8000).contains('\0')) return {};
 
     return scanText(QString::fromUtf8(data));
+}
+
+QVector<Finding> SecScan::scanTree(const QString& dir, int* files) {
+    QVector<Finding> out;
+    int seen = 0;
+    if (files) *files = 0;
+
+    QFileInfo di(dir);
+    if (di.isFile()) {  // a file is a perfectly good thing to point `scan` at
+        out = scanFile(dir);
+        for (Finding& f : out) f.file = dir;
+        if (files) *files = 1;
+        return out;
+    }
+    if (!di.isDir()) return out;
+
+    // Where secrets are not, and noise is. A scanner that spends its time in
+    // node_modules is a scanner nobody waits for.
+    static const QStringList kSkip{
+        QStringLiteral(".git"),        QStringLiteral("node_modules"),
+        QStringLiteral("build"),       QStringLiteral("dist"),
+        QStringLiteral("target"),      QStringLiteral("vendor"),
+        QStringLiteral(".venv"),       QStringLiteral("venv"),
+        QStringLiteral("__pycache__"), QStringLiteral(".cache"),
+        QStringLiteral(".ollamadev")};
+
+    QDirIterator it(dir, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        const QString rel = QDir(dir).relativeFilePath(path);
+
+        bool skip = false;
+        for (const QString& part : rel.split(QLatin1Char('/'))) {
+            if (kSkip.contains(part)) {
+                skip = true;
+                break;
+            }
+        }
+        if (skip) continue;
+
+        const QVector<Finding> hits = scanFile(path);
+        ++seen;
+        for (Finding f : hits) {
+            f.file = rel;  // relative: an absolute path in a report is just noise
+            out.append(f);
+        }
+        // A tree with a hundred thousand files is a mistake, not a project. Stop
+        // rather than appear to hang.
+        if (seen >= 20000) break;
+    }
+    if (files) *files = seen;
+    return out;
 }
 
 }  // namespace odv

@@ -829,15 +829,33 @@ int cmdBoard(const QStringList& args) {
 }
 
 int cmdScan(const QStringList& args) {
-    const QString path = args.value(0, QDir::currentPath());
-    const auto findings = SecScan::scanFile(path);
+    const QString path = positionals(args).value(0, QDir::currentPath());
+
+    // scanTree, not scanFile. The default argument is the current DIRECTORY, and
+    // scanFile only accepts a file — so `ollamadev scan`, the natural way to run
+    // the scanner, used to examine NOTHING and print "clean". An all-clear from a
+    // scan that never happened is worse than no scanner at all.
+    int files = 0;
+    const auto findings = SecScan::scanTree(path, &files);
+
     int high = 0;
     for (const auto& f : findings) {
         if (f.severity == "high") ++high;
-        out() << "  " << f.severity << "  " << f.rule << "  line " << f.line << "  "
+        out() << "  " << f.severity.leftJustified(5) << " " << f.rule.leftJustified(16) << " "
+              << (f.file.isEmpty() ? QString() : f.file + QLatin1Char(':')) << f.line << "  "
               << f.redacted << "\n";
     }
-    if (findings.isEmpty()) out() << "clean\n";
+
+    // Always say what was actually looked at. "clean" on its own is a claim; "clean
+    // — 0 files" is the truth about a scan that found nothing because it read
+    // nothing, and the difference matters when the answer is about secrets.
+    if (files == 0)
+        out() << "nothing to scan in " << path << "\n";
+    else if (findings.isEmpty())
+        out() << "clean — " << files << " files scanned\n";
+    else
+        out() << "\n" << findings.size() << " finding(s) in " << files << " files scanned\n";
+
     out().flush();
     return high > 0 ? 1 : 0;
 }

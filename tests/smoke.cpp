@@ -77,6 +77,40 @@ static void testSecScan() {
 
     const auto clean = SecScan::scanDiff("-AWS_SECRET=AKIAIOSFODNN7EXAMPLE\n");
     check(clean.isEmpty(), "scanDiff ignores removed lines");
+
+    // `ollamadev scan` defaults to the current DIRECTORY, and scanFile() only ever
+    // accepted a file — so the natural way to run the scanner examined NOTHING and
+    // printed "clean". An all-clear from a scan that never happened is worse than
+    // no scanner at all, so a tree scan is what the command actually needs.
+    QTemporaryDir tree;
+    QDir(tree.path()).mkpath(QStringLiteral("src"));
+    QDir(tree.path()).mkpath(QStringLiteral("node_modules/junk"));
+    const auto put = [](const QString& p, const char* text) {
+        QFile f(p);
+        f.open(QIODevice::WriteOnly);
+        f.write(text);
+        f.close();
+    };
+    put(tree.path() + "/src/creds.py", "AWS_KEY = \"AKIAIOSFODNN7EXAMPLE\"\n");
+    put(tree.path() + "/src/fine.py", "print('hello')\n");
+    // A secret in node_modules is somebody else's problem, and scanning it is how a
+    // scanner becomes slow enough to be switched off.
+    put(tree.path() + "/node_modules/junk/leak.js", "const k = \"AKIAIOSFODNN7EXAMPLE\";\n");
+
+    int files = 0;
+    const auto found = SecScan::scanTree(tree.path(), &files);
+    check(found.size() == 1, "scanTree walks a DIRECTORY (scanFile silently returned nothing)");
+    check(found.first().file == QStringLiteral("src/creds.py"),
+          "a tree finding says WHICH file — 'line 1' of what, otherwise?");
+    check(files == 2, "node_modules is skipped, so the count is of files really read");
+
+    int none = 0;
+    SecScan::scanTree(tree.path() + QStringLiteral("/nope"), &none);
+    check(none == 0, "a scan that reads nothing reports reading nothing — it must not say 'clean'");
+
+    int one = 0;
+    const auto direct = SecScan::scanTree(tree.path() + QStringLiteral("/src/creds.py"), &one);
+    check(direct.size() == 1 && one == 1, "…and a single file is still a fine thing to scan");
 }
 
 static void testSandbox() {
