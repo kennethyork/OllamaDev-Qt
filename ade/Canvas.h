@@ -58,6 +58,10 @@ public:
     void raisePane(Pane* p);
     void toggleFocus(Pane* p);  // maximise to the viewport / restore
     QString maximisedId() const { return maxId_; }
+    // The geometry the maximised pane will spring back to when un-maximised. Only
+    // meaningful while maximisedId() is non-empty; this is what a save must record
+    // for that pane, NOT its current viewport-filling rect.
+    QRectF preMaximiseGeom() const { return maxSaved_; }
 
     double zoom() const;
     void setZoom(double z, const QPoint& anchor = QPoint(-1, -1));

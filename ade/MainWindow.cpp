@@ -713,7 +713,11 @@ QJsonObject MainWindow::captureState() const {
     QJsonObject panes;
     for (Pane* p : canvas_->panes()) {
         const QString id = p->id();
-        const QRectF g = p->geometryF();
+        // For the maximised pane, persist the geometry it un-maximises TO, not its
+        // current viewport-filling rect — otherwise restore re-maximises from the
+        // full-size rect and the original size/position is lost forever.
+        const QRectF g =
+            id == canvas_->maximisedId() ? canvas_->preMaximiseGeom() : p->geometryF();
         if (id.startsWith(QLatin1String("__pop_"))) {
             const QString view = id.mid(6, id.size() - 8);  // __pop_<view>__
             panes.insert(view, geomToJson(g));
