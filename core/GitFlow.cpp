@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 
 #include "Config.h"
@@ -28,12 +29,21 @@ constexpr int kReviewBudget = 14000;
 // ignored that would reach out of the sandbox and commit in the user's real repo.
 QString runRoot() { return Tools::threadRoot(); }
 
-GitResult runTool(const QString& program, const QStringList& args, const QString& stdinText) {
+GitResult runTool(const QString& program, const QStringList& args, const QString& stdinText,
+                  const QStringList& env = {}) {
     GitResult r;
     QProcess p;
     p.setProgram(program);
     p.setArguments(args);  // argv array: no shell, so nothing here can be syntax
     p.setWorkingDirectory(runRoot());
+    if (!env.isEmpty()) {
+        QProcessEnvironment e = QProcessEnvironment::systemEnvironment();
+        for (const QString& kv : env) {
+            const int eq = kv.indexOf(QLatin1Char('='));
+            if (eq > 0) e.insert(kv.left(eq), kv.mid(eq + 1));
+        }
+        p.setProcessEnvironment(e);
+    }
     p.setProcessChannelMode(QProcess::MergedChannels);
     p.start();
     if (!p.waitForStarted(10000)) {
@@ -74,8 +84,8 @@ QJsonObject askJson(const QString& backendId, const QString& model, const QStrin
 
 }  // namespace
 
-GitResult GitFlow::git(const QStringList& args, const QString& stdinText) {
-    return runTool(QStringLiteral("git"), args, stdinText);
+GitResult GitFlow::git(const QStringList& args, const QString& stdinText, const QStringList& env) {
+    return runTool(QStringLiteral("git"), args, stdinText, env);
 }
 
 bool GitFlow::isRepo() {

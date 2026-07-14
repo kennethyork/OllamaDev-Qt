@@ -31,6 +31,8 @@
 #include "Config.h"
 #include "GitFlow.h"
 #include "GitGraph.h"
+#include "Rebase.h"
+#include "RebaseDialog.h"
 #include "SecScan.h"
 #include "Theme.h"
 
@@ -170,6 +172,9 @@ public:
             b->setToolTip(label);
             return b;
         };
+        tidyBtn_ = button(tr("Tidy"));
+        tidyBtn_->setToolTip(tr("Tidy history — interactive rebase, with the model proposing "
+                                "what to fold together and what to reword"));
         newBranchBtn_ = button(tr("Branch"));
         stashBtn_ = button(tr("Stash"));
         fetchBtn_ = button(tr("Fetch"));
@@ -182,6 +187,7 @@ public:
         auto* push = pushBtn_;
         bar->addWidget(branchLabel_);
         bar->addStretch(1);
+        bar->addWidget(tidyBtn_);
         bar->addWidget(newBranchBtn_);
         bar->addWidget(stashBtn_);
         bar->addWidget(fetchBtn_);
@@ -238,6 +244,7 @@ public:
         status_->setStyleSheet(QStringLiteral("color:%1").arg(Theme::currentColors().dim.name()));
         root->addWidget(status_);
 
+        connect(tidyBtn_, &QPushButton::clicked, this, [this] { tidyHistory(); });
         connect(newBranch, &QPushButton::clicked, this, [this] { createBranch(QString()); });
         connect(stash, &QPushButton::clicked, this, [this] { stashPush(); });
         connect(fetch, &QPushButton::clicked, this, [this] {
@@ -297,7 +304,7 @@ private:
         // Five full-width buttons alone want ~400px, which is most of a small pane.
         // Below that they lose their labels and keep their tooltips.
         const bool labels = w >= 560;
-        for (auto* b : {stashBtn_, fetchBtn_, pullBtn_, pushBtn_, newBranchBtn_}) {
+        for (auto* b : {stashBtn_, fetchBtn_, pullBtn_, pushBtn_, newBranchBtn_, tidyBtn_}) {
             b->setText(labels ? b->property("full").toString()
                               : b->property("full").toString().left(1));
             b->setFixedWidth(labels ? QWIDGETSIZE_MAX : 26);
@@ -828,6 +835,23 @@ private:
 
     void checkout(const QString& ref) { run({QStringLiteral("checkout"), ref}); }
 
+    void tidyHistory() {
+        // A rebase mid-rebase is not a thing. Offer the way out instead.
+        if (Rebase::inProgress()) {
+            if (confirm(tr("Rebase in progress"),
+                        tr("A rebase is already running and stopped on something.\n\nAbort it and "
+                           "put everything back?"),
+                        tr("Abort it")))
+                run({QStringLiteral("rebase"), QStringLiteral("--abort")});
+            return;
+        }
+        RebaseDialog dlg(host_, host_.window());
+        if (dlg.exec() == QDialog::Accepted) {
+            lastLog_.clear();
+            refresh();
+        }
+    }
+
     void createBranch(const QString& from) {
         const QString name =
             ask(tr("New branch"),
@@ -1015,6 +1039,7 @@ private:
     PaneHost& host_;
     QLabel* branchLabel_;
     QPushButton* newBranchBtn_;
+    QPushButton* tidyBtn_;
     QPushButton* stashBtn_;
     QPushButton* fetchBtn_;
     QPushButton* pullBtn_;

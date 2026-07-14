@@ -21,6 +21,7 @@ add_library(odv-core STATIC
     StdioRpc.cpp StdioRpc.h
     Acp.cpp Acp.h
     Plugins.cpp Plugins.h
+    Rebase.cpp Rebase.h
     Update.cpp Update.h
     Workspaces.cpp Workspaces.h
     CodeIndex.cpp CodeIndex.h

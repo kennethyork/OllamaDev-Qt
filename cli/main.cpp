@@ -42,6 +42,7 @@
 #include "Vision.h"
 #include "Acp.h"
 #include "Plugins.h"
+#include "Rebase.h"
 #include "Update.h"
 #include "Workspaces.h"
 #include "Version.h"
@@ -542,6 +543,65 @@ int cmdImport(const QStringList& args) {
     out() << "✓ imported " << n << " session(s) — open one: ollamadev load <id>\n";
     out().flush();
     return n > 0 ? 0 : 1;
+}
+
+
+// ------------------------------------------------------------------------ tidy
+
+int cmdTidy(const QStringList& args) {
+    if (!GitFlow::isRepo()) {
+        err() << "not a git repository\n";
+        err().flush();
+        return 1;
+    }
+    const int n = qBound(2, positionals(args).value(0, QStringLiteral("10")).toInt(), 50);
+
+    RebasePlan plan = Rebase::planFor(n);
+    if (plan.steps.isEmpty()) {
+        out() << "nothing to tidy\n";
+        out().flush();
+        return 0;
+    }
+
+    const QString backend = Config::str("model.backend", "ollama");
+    const QString model = GitFlow::modelFor(Config::str("ollama.defaultModel", ""));
+    out() << "reading " << plan.steps.size() << " commits with " << model << "…\n";
+    out().flush();
+
+    CancelToken cancel;
+    plan = Rebase::propose(plan, backend, model, cancel);
+
+    if (!plan.rationale.isEmpty()) out() << "\n" << plan.rationale << "\n";
+    out() << "\nthe plan (oldest first):\n";
+    for (const RebaseStep& s : plan.steps) {
+        out() << "  " << s.actionName().leftJustified(7) << s.sha.left(8) << "  " << s.subject
+              << "\n";
+        if (s.action == RebaseStep::Reword && !s.newMessage.isEmpty())
+            out() << "          → " << s.newMessage.split(QLatin1Char('\n')).first() << "\n";
+    }
+    out() << "\n";
+    out().flush();
+
+    // Rewriting history is not something to do because a command sounded like a
+    // question. --dry-run stops here; anything else asks.
+    if (hasFlag(args, "--dry-run")) return 0;
+    if (!hasFlag(args, "--yes") && !askYesNo(QStringLiteral("rewrite these commits?"))) {
+        out() << "left alone\n";
+        out().flush();
+        return 0;
+    }
+
+    QString e;
+    const RebaseResult r = Rebase::apply(plan, &e);
+    if (!r.ok) {
+        err() << (e.isEmpty() ? r.output : e) << "\n";
+        if (r.conflicted) err() << "resolve it, or: git rebase --abort\n";
+        err().flush();
+        return 1;
+    }
+    out() << "✓ rewritten. undo with:  git reset --hard " << r.backupRef << "\n";
+    out().flush();
+    return 0;
 }
 
 // --------------------------------------------------------------------- plugins
@@ -2875,6 +2935,7 @@ int main(int argc, char** argv) {
     if (cmd == "board") return cmdBoard(rest);
     if (cmd == "ws" || cmd == "workspace") return cmdWorkspace(rest);
     if (cmd == "plugin" || cmd == "plugins") return cmdPlugin(rest);
+    if (cmd == "tidy") return cmdTidy(rest);
     if (cmd == "acp") return Acp::serve();
     if (cmd == "update" || cmd == "upgrade") return cmdUpdate(rest);
     if (cmd == "export") return cmdExport(rest);

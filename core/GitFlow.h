@@ -75,7 +75,12 @@ class GitFlow {
 public:
     // Run git in the tool root with an argv array. `stdinText`, when non-empty, is
     // written to the child's stdin and the pipe closed (that is what `-F -` reads).
-    static GitResult git(const QStringList& args, const QString& stdinText = {});
+    // `env` entries are "KEY=VALUE", added to the inherited environment. This is
+    // how an interactive rebase is driven WITHOUT an editor: GIT_SEQUENCE_EDITOR is
+    // pointed at a command that drops our own todo list over git's, so the whole
+    // rebase runs headless. Nothing else needs it.
+    static GitResult git(const QStringList& args, const QString& stdinText = {},
+                         const QStringList& env = {});
 
     static bool isRepo();
     static bool hasGh();  // the PR commands need it; everything else is local git

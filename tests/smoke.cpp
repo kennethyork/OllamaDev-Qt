@@ -18,6 +18,7 @@
 #include "Models.h"
 #include "Parallel.h"
 #include "Plugins.h"
+#include "Rebase.h"
 #include "Sandbox.h"
 #include "SecScan.h"
 #include "Session.h"
@@ -1006,6 +1007,123 @@ static void testGitGraph() {
     check(commits.at(4).lanesWide == 1, "…and stay collapsed down to the root");
 }
 
+// Interactive rebase, driven headlessly. Rewriting history is the most dangerous
+// thing this app does, so the guards are tested as hard as the happy path.
+static void testRebase() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        check(false, "temp dir for the rebase test");
+        return;
+    }
+    const QString root = tmp.path();
+    Tools::setThreadRoot(root);
+
+    auto git = [&](const QStringList& a) {
+        QProcess p;
+        p.setWorkingDirectory(root);
+        p.start(QStringLiteral("git"), a);
+        return p.waitForFinished(10000) && p.exitCode() == 0;
+    };
+    if (!git({QStringLiteral("init"), QStringLiteral("-q"), QStringLiteral("-b"),
+              QStringLiteral("main")})) {
+        check(true, "git is not installed — skipping the rebase tests");
+        Tools::setThreadRoot(QString());
+        return;
+    }
+    git({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@t.t")});
+    git({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("t")});
+
+    const auto commit = [&](const QString& line, const QString& msg) {
+        QFile f(root + QStringLiteral("/f.txt"));
+        f.open(QIODevice::Append);
+        f.write(line.toUtf8() + "\n");
+        f.close();
+        git({QStringLiteral("add"), QStringLiteral("-A")});
+        git({QStringLiteral("commit"), QStringLiteral("-qm"), msg});
+    };
+    commit(QStringLiteral("a"), QStringLiteral("add the parser"));
+    commit(QStringLiteral("b"), QStringLiteral("wip"));
+    commit(QStringLiteral("c"), QStringLiteral("fix typo"));
+    commit(QStringLiteral("d"), QStringLiteral("add tests"));
+
+    RebasePlan plan = Rebase::planFor(4);
+    check(plan.steps.size() == 4, "planFor reads back the commits");
+    check(plan.steps.first().subject == QStringLiteral("add the parser"),
+          "the plan is OLDEST FIRST — which is git's todo order, and getting it "
+          "backwards would fold every commit into the wrong one");
+    check(plan.base == QStringLiteral("--root"),
+          "rewriting everything back to the root is spelled --root, not HEAD~n");
+
+    // Fold the two junk commits into the parser, keep the rest.
+    plan.steps[1].action = RebaseStep::Fixup;
+    plan.steps[2].action = RebaseStep::Fixup;
+    plan.steps[3].action = RebaseStep::Reword;
+    plan.steps[3].newMessage = QStringLiteral("test: add the tests");
+
+    QString err;
+    const RebaseResult r = Rebase::apply(plan, &err);
+    check(r.ok, "the rebase runs headlessly — no editor, ever");
+    check(!r.backupRef.isEmpty(), "a backup ref is taken BEFORE anything moves");
+
+    QProcess log;
+    log.setWorkingDirectory(root);
+    log.start(QStringLiteral("git"),
+              {QStringLiteral("log"), QStringLiteral("--oneline"), QStringLiteral("--format=%s")});
+    log.waitForFinished(5000);
+    const QStringList subjects =
+        QString::fromUtf8(log.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts);
+    check(subjects.size() == 2, "4 commits became 2");
+    check(subjects.first() == QStringLiteral("test: add the tests"),
+          "reword replaced the message — without ever opening an editor");
+    check(subjects.last() == QStringLiteral("add the parser"),
+          "fixup folded the junk into the commit above and kept ITS message");
+
+    // The content must survive. A rebase that loses a line is worse than no rebase.
+    QFile f(root + QStringLiteral("/f.txt"));
+    f.open(QIODevice::ReadOnly);
+    const QString text = QString::fromUtf8(f.readAll());
+    f.close();
+    check(text.contains('a') && text.contains('b') && text.contains('c') && text.contains('d'),
+          "EVERY line of code survives the rewrite");
+
+    // Undo.
+    check(Rebase::undo(r.backupRef, &err), "the backup ref undoes the whole rebase");
+    log.start(QStringLiteral("git"), {QStringLiteral("log"), QStringLiteral("--format=%s")});
+    log.waitForFinished(5000);
+    check(QString::fromUtf8(log.readAllStandardOutput())
+                  .split('\n', Qt::SkipEmptyParts)
+                  .size() == 4,
+          "…and all four original commits are back");
+
+    // ---- the guards ----
+    RebasePlan bad = Rebase::planFor(3);
+    for (RebaseStep& s : bad.steps) s.action = RebaseStep::Drop;
+    check(!Rebase::apply(bad, &err).ok, "a plan that drops every commit is refused");
+
+    RebasePlan dirty = Rebase::planFor(3);
+    QFile d(root + QStringLiteral("/f.txt"));
+    d.open(QIODevice::Append);
+    d.write("uncommitted\n");
+    d.close();
+    check(!Rebase::apply(dirty, &err).ok && err.contains(QStringLiteral("stash")),
+          "a rebase over uncommitted TRACKED changes is refused");
+
+    // …but an untracked file must NOT block it: git does not mind them, and this app
+    // drops its own .ollamadev/ folder into every project it touches — so counting
+    // those made the app's own droppings refuse the app's own rebase.
+    git({QStringLiteral("checkout"), QStringLiteral("--"), QStringLiteral("f.txt")});
+    QDir(root).mkpath(QStringLiteral(".ollamadev"));
+    QFile junk(root + QStringLiteral("/.ollamadev/sessions.json"));
+    junk.open(QIODevice::WriteOnly);
+    junk.write("{}");
+    junk.close();
+    RebasePlan withJunk = Rebase::planFor(2);
+    check(Rebase::apply(withJunk, &err).ok,
+          "an UNTRACKED file does not block a rebase (the app's own .ollamadev did)");
+
+    Tools::setThreadRoot(QString());
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -1030,6 +1148,7 @@ int main(int argc, char** argv) {
     s << "acp\n";        s.flush(); testAcp();
     s << "lsp\n";        s.flush(); testLsp();
     s << "git-graph\n";  s.flush(); testGitGraph();
+    s << "rebase\n";     s.flush(); testRebase();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();
