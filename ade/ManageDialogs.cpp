@@ -340,11 +340,20 @@ void openCrewLaunch(PaneHost& host) {
     research->setChecked(true);
     auto* audit = new QCheckBox(QObject::tr("Audit phase"));
     audit->setChecked(true);
+    // The brain — all opt-in, exactly as on the CLI. Off = the plain crew.
+    auto* brain = new QCheckBox(QObject::tr("🧠 Use the brain — auto-pick a model per subtask by difficulty"));
+    auto* debate = new QCheckBox(QObject::tr("Debate each change (advocate vs skeptic vs judge)"));
+    auto* dedupe = new QCheckBox(QObject::tr("Dedupe — hold work that duplicates another coder's"));
+    auto* learn = new QCheckBox(QObject::tr("Learn — remember what this run teaches for next time"));
     form->addRow(QObject::tr("Max coders"), max);
     form->addRow(QObject::tr("Focus"), focus);
     form->addRow(QString(), review);
     form->addRow(QString(), research);
     form->addRow(QString(), audit);
+    form->addRow(QString(), brain);
+    form->addRow(QString(), debate);
+    form->addRow(QString(), dedupe);
+    form->addRow(QString(), learn);
     v->addLayout(form);
 
     auto* box = new QDialogButtonBox(QDialogButtonBox::Cancel);
@@ -368,6 +377,10 @@ void openCrewLaunch(PaneHost& host) {
         if (review->isChecked()) cmd += QStringLiteral(" --review");
         if (!research->isChecked()) cmd += QStringLiteral(" --no-research");
         if (!audit->isChecked()) cmd += QStringLiteral(" --no-audit");
+        if (brain->isChecked()) cmd += QStringLiteral(" --route");
+        if (debate->isChecked()) cmd += QStringLiteral(" --debate");
+        if (dedupe->isChecked()) cmd += QStringLiteral(" --dedupe");
+        if (learn->isChecked()) cmd += QStringLiteral(" --learn");
         const QString f = focus->text().trimmed();
         if (!f.isEmpty()) {
             QString sf = f;
