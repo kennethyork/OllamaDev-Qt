@@ -14,6 +14,12 @@ on:
         required: true
         type: string
 
+# One run per ref at a time: a newer push to main cancels an older in-flight run,
+# so releases don't pile up or two runs race to publish the same version.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     # 22.04 is not just "an LTS": it is the glibc floor (2.35) the project ships
@@ -108,9 +114,15 @@ jobs:
           path: dist/OllamaDev-x86_64.AppImage
 
   release:
-    # Runs on a tag push OR a manual dispatch — and only once every job above is
-    # green, so a release artifact that never passed the suite is impossible.
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Runs on EVERY push to main, plus tags and manual dispatch — and only once
+    # every job above is green, so a release that never passed the suite is
+    # impossible. A push to main publishes/updates the release for the version in
+    # core/Version.h; a tag or dispatch publishes that exact version. Never skips
+    # on a push. (Pull requests still don't release — only main pushes do.)
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
     needs: [build, cli-only, appimage]
     runs-on: ubuntu-24.04
     permissions:
@@ -141,9 +153,14 @@ jobs:
           # ubuntu-latest would silently raise the floor and the AppImage would
           # refuse to start on Mint 21 — with no warning until a user reports it.
           #
-          # TAG comes from the pushed tag, or the dispatch input on a manual run.
+          # TAG comes from: the dispatch input, else the pushed tag, else — on a
+          # plain push to main — the version baked into core/Version.h. So every
+          # main push publishes/updates that version's release.
           TAG="${{ github.event.inputs.tag }}"
-          [ -z "$TAG" ] && TAG="${GITHUB_REF_NAME}"
+          if [ -z "$TAG" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          if [ -z "$TAG" ]; then
+            TAG="v$(sed -n 's/.*ODV_VERSION "\([0-9.]*\)".*/\1/p' core/Version.h)"
+          fi
           # A manual dispatch has no tag object yet — point one at this commit so
           # the release has something to hang on, and re-publish (clobber) if the
           # release already exists.
