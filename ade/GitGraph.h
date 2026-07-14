@@ -1,5 +1,4 @@
 #pragma once
-#include <QColor>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -40,8 +39,10 @@ public:
     // Fills in lane / links / lanesWide. Returns the widest row.
     static int layout(QVector<GraphCommit>& commits);
 
-    // Stable colour per lane, so a branch keeps its colour as you scroll.
-    static QColor laneColor(int lane);
+    // Deliberately NO colour here. GitGraph is pure layout — which commit sits in
+    // which lane — and that is testable without a GUI. The palette lives with the
+    // thing that paints it, so a headless build (ODV_BUILD_ADE=OFF) never has to
+    // drag in QtGui just to run the tests.
 };
 
 }  // namespace odv

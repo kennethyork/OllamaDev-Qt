@@ -94,15 +94,4 @@ int GitGraph::layout(QVector<GraphCommit>& commits) {
     }
     return widest;
 }
-
-QColor GitGraph::laneColor(int lane) {
-    // Fixed palette, indexed by lane, so a branch keeps its colour while you scroll.
-    static const QColor kColors[] = {
-        QColor(0x4f, 0xc3, 0xf7), QColor(0x81, 0xc7, 0x84), QColor(0xff, 0xb7, 0x4d),
-        QColor(0xba, 0x68, 0xc8), QColor(0xe5, 0x73, 0x73), QColor(0x4d, 0xd0, 0xe1),
-        QColor(0xff, 0xd5, 0x4f), QColor(0xa1, 0x88, 0x7f),
-    };
-    return kColors[qAbs(lane) % 8];
-}
-
 }  // namespace odv

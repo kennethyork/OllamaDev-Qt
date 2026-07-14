@@ -98,6 +98,18 @@ QString describeCode(const QString& code) {
 constexpr int kLaneW = 14;  // px per graph lane
 constexpr int kRowH = 22;
 
+// Stable colour per lane, so a branch keeps its colour while you scroll. Lives
+// here rather than in GitGraph: the graph's job is deciding which lane a commit
+// sits in, which is pure logic and testable without a GUI.
+QColor laneColor(int lane) {
+    static const QColor kColors[] = {
+        QColor(0x4f, 0xc3, 0xf7), QColor(0x81, 0xc7, 0x84), QColor(0xff, 0xb7, 0x4d),
+        QColor(0xba, 0x68, 0xc8), QColor(0xe5, 0x73, 0x73), QColor(0x4d, 0xd0, 0xe1),
+        QColor(0xff, 0xd5, 0x4f), QColor(0xa1, 0x88, 0x7f),
+    };
+    return kColors[qAbs(lane) % 8];
+}
+
 // Paints the lane graph in column 0 of the history list.
 //
 // A delegate rather than a separate widget beside the list, so the graph and its
@@ -129,7 +141,7 @@ public:
             const QVariantList pair = e.toList();
             if (pair.size() != 2) continue;
             const int from = pair.at(0).toInt(), to = pair.at(1).toInt();
-            p->setPen(QPen(GitGraph::laneColor(to), 1.6));
+            p->setPen(QPen(laneColor(to), 1.6));
             if (from == to) {
                 p->drawLine(laneX(from), top, laneX(from), top + h);  // straight through
             } else {
@@ -140,7 +152,7 @@ public:
             }
         }
 
-        const QColor c = GitGraph::laneColor(lane);
+        const QColor c = laneColor(lane);
         p->setPen(QPen(c, 1.6));
         p->setBrush(isHead ? QBrush(c) : QBrush(Qt::NoBrush));
         const qreal r = isHead ? 4.5 : 3.5;
