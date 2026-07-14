@@ -82,6 +82,20 @@ public:
     // for those we drive them one prompt at a time and they do their own edits.
     virtual bool supportsNativeTools() const = 0;
 
+    // Whether THIS MODEL can do tool calls, as opposed to whether the backend can.
+    // The distinction is the whole story for vision: most vision models ship with
+    // capabilities [completion, vision] and no `tools`, so handing them a tool
+    // schema gets you an empty reply. A conversational surface should then run them
+    // as a plain chat; an agent or a crew coder must fail loudly instead, because a
+    // coder that cannot call edit() cannot do its job.
+    //
+    // Defaults to true: a backend that runs its own agent loop (the coding CLIs)
+    // has no per-model notion of this.
+    virtual bool modelSupportsTools(const QString& model) {
+        Q_UNUSED(model);
+        return true;
+    }
+
     // Blocking single turn.
     virtual ChatTurn chat(const QString& model,
                           const QVector<ChatMessage>& messages,

@@ -16,6 +16,7 @@
 #include "Sandbox.h"
 #include "SecScan.h"
 #include "Tools.h"
+#include "Vision.h"
 
 using namespace odv;
 
@@ -437,6 +438,55 @@ static void testAgentTools() {
     Tools::setThreadRoot(QString());
 }
 
+// Vision: an @image token becomes base64 on the message and LEAVES the prompt.
+// Every surface that takes typed text must go through Vision::attach — the
+// one-shot path did not, and silently sent the model the literal path instead.
+static void testVision() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        check(false, "temp dir for the vision test");
+        return;
+    }
+    // A 1x1 PNG. Real bytes, so encodeBase64 has something true to do.
+    static const unsigned char png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+    const QString shot = tmp.path() + QStringLiteral("/shot.png");
+    QFile f(shot);
+    f.open(QIODevice::WriteOnly);
+    f.write(reinterpret_cast<const char*>(png), sizeof(png));
+    f.close();
+
+    ChatMessage m;
+    int attached = 0;
+    QString cleaned = Vision::attach(m, QStringLiteral("what is wrong with @") + shot, &attached);
+    check(attached == 1 && m.images.size() == 1, "an @image token attaches the image");
+    check(m.images.value(0).startsWith(QStringLiteral("iVBORw0KGgo")),
+          "the image is attached as base64 (a PNG header)");
+    check(!cleaned.contains(shot), "the path is taken back OUT of the prompt the model reads");
+    check(cleaned.contains(QStringLiteral("what is wrong with")), "the rest of the prompt survives");
+
+    // /image is the other spelling, and a bare one still needs an instruction.
+    ChatMessage m2;
+    cleaned = Vision::attach(m2, QStringLiteral("/image ") + shot, &attached);
+    check(m2.images.size() == 1 && !cleaned.isEmpty(),
+          "/image attaches, and a bare /image still asks the model something");
+
+    // A non-image @token is a file mention, NOT a picture — leave it alone.
+    ChatMessage m3;
+    const QString notes = tmp.path() + QStringLiteral("/notes.txt");
+    QFile n(notes);
+    n.open(QIODevice::WriteOnly);
+    n.write("hi");
+    n.close();
+    cleaned = Vision::attach(m3, QStringLiteral("read @") + notes, &attached);
+    check(m3.images.isEmpty() && cleaned.contains(notes),
+          "a non-image @mention is left for the file-mention path");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -452,6 +502,7 @@ int main(int argc, char** argv) {
     s << "crew-resume\n"; s.flush(); testCrewResume();
     s << "crew-amplify\n"; s.flush(); testCrewAmplify();
     s << "agent-tools\n"; s.flush(); testAgentTools();
+    s << "vision\n";      s.flush(); testVision();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

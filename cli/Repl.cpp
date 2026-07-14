@@ -593,18 +593,13 @@ void Repl::runTurn(const QString& text) {
     user.role = QStringLiteral("user");
 
     // Vision: pull any /image or @image.png attachments out FIRST, base64 them onto
-    // the message's images[] (Ollama sends them to a vision model, and ignores them
-    // on a text one), and strip the tokens so what's left is a natural prompt. This
-    // runs before expandMentions so an image @token is never inlined as raw bytes.
-    const QStringList imgPaths = Vision::extractImagePaths(text);
-    for (const QString& p : imgPaths) {
-        const QString b64 = Vision::encodeBase64(p);
-        if (!b64.isEmpty()) user.images << b64;
-    }
-    if (!user.images.isEmpty())
-        emitRaw(dim(QStringLiteral("  🖼 attached %1 image(s)").arg(user.images.size())) +
-                QLatin1Char('\n'));
-    const QString cleaned = imgPaths.isEmpty() ? text : Vision::stripImageTokens(text);
+    // the message's images[], and strip the tokens so what's left is a natural
+    // prompt. This runs before expandMentions so an image @token is never inlined
+    // as raw bytes.
+    int attached = 0;
+    const QString cleaned = Vision::attach(user, text, &attached);
+    if (attached > 0)
+        emitRaw(dim(QStringLiteral("  🖼 attached %1 image(s)").arg(attached)) + QLatin1Char('\n'));
 
     user.content = expandMentions(cleaned);
     session_.messages().append(user);

@@ -82,6 +82,22 @@ const QRegularExpression& atToken() {
 
 }  // namespace
 
+QString Vision::attach(ChatMessage& msg, const QString& text, int* attached) {
+    if (attached) *attached = 0;
+    const QStringList paths = extractImagePaths(text);
+    if (paths.isEmpty()) return text;
+
+    for (const QString& p : paths) {
+        const QString b64 = encodeBase64(p);
+        if (b64.isEmpty()) continue;  // unreadable — leave the token as plain text
+        msg.images << b64;
+        if (attached) ++*attached;
+    }
+    // Strip the tokens whether or not every file read: a path the model can see but
+    // cannot open is worse than no path at all — it will go hunting for it.
+    return stripImageTokens(text);
+}
+
 QStringList Vision::extractImagePaths(const QString& prompt) {
     QStringList paths;
 

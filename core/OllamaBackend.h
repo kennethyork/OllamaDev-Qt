@@ -36,6 +36,7 @@ public:
     // Ollama parses tool calls for us (native function calling), so the agent
     // loop gets structured calls instead of scraping prose.
     bool supportsNativeTools() const override { return true; }
+    bool modelSupportsTools(const QString& model) override { return supportsTools(model); }
 
     ChatTurn chat(const QString& model,
                   const QVector<ChatMessage>& messages,

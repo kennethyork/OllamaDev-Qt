@@ -38,6 +38,7 @@
 #include "Tools.h"
 #include "Usage.h"
 #include "Verify.h"
+#include "Vision.h"
 #include "Version.h"
 #include "Watch.h"
 #include "WebSearch.h"
@@ -614,9 +615,20 @@ int cmdOneShot(const QString& prompt, const QStringList& args) {
     Permission::setInteractive(true);
     Tools::setThreadRoot(QDir::currentPath());
 
+    // A one-shot takes a prompt exactly like the REPL does, so it gets vision
+    // exactly like the REPL does: `ollamadev "what is wrong with @screenshot.png"`
+    // used to send the model the literal text "@screenshot.png" and nothing else.
+    ChatMessage user;
+    user.role = QStringLiteral("user");
+    int attached = 0;
+    user.content = Vision::attach(user, prompt, &attached);
+    if (attached > 0) {
+        err() << "🖼 attached " << attached << " image(s)\n";
+        err().flush();
+    }
+
     QVector<ChatMessage> msgs{
-        {"system", a.buildSystemPrompt(QDir::currentPath()), {}, {}, {}, {}, {}},
-        {"user", prompt, {}, {}, {}, {}, {}}};
+        {"system", a.buildSystemPrompt(QDir::currentPath()), {}, {}, {}, {}, {}}, user};
 
     StreamSink sink;
     sink.onContent = [](const QString& c) {
@@ -625,9 +637,45 @@ int cmdOneShot(const QString& prompt, const QStringList& args) {
     };
 
     CancelToken cancel;
-    a.loop(msgs, Config::integer("agents.maxIterations", 20), sink, cancel);
+
+    // A model with no `tools` capability cannot run the agent loop at all — handed
+    // a tool schema it replies with an empty string. Nearly every vision model is
+    // in that boat, so `ollamadev -m moondream "what is in @shot.png"` printed
+    // NOTHING: the image attached fine and the answer vanished. Have the
+    // conversation instead — no tools, one turn — and say plainly that is what
+    // happened. (This is not the banned text-protocol fallback: we are not scraping
+    // prose for pretend tool calls, we are declining to offer tools to a model that
+    // does not have them.)
+    auto be = Backends::get(backend);
+    if (be && be->supportsNativeTools() && !be->modelSupportsTools(model)) {
+        err() << "note: " << model
+              << " has no tool support — answering as a plain chat (it cannot edit files)\n";
+        err().flush();
+        const ChatTurn t = be->chat(model, msgs, QJsonArray(), sink, cancel);
+        out() << "\n";
+        out().flush();
+        if (!t.ok || t.content.trimmed().isEmpty()) {
+            err() << (t.error.isEmpty() ? QStringLiteral("the model returned nothing") : t.error)
+                  << "\n";
+            err().flush();
+            return 1;
+        }
+        return 0;
+    }
+
+    const QString finalText =
+        a.loop(msgs, Config::integer("agents.maxIterations", 20), sink, cancel);
     out() << "\n";
     out().flush();
+    // The one-shot used to swallow the agent's error and exit 0 on an empty reply,
+    // which is the worst way to fail: it reads as "the model had nothing to say".
+    if (finalText.trimmed().isEmpty()) {
+        err() << "the model returned nothing (run with a tool-capable model, or check `ollama "
+                 "show "
+              << model << " | grep capabilities`)\n";
+        err().flush();
+        return 1;
+    }
     return 0;
 }
 
