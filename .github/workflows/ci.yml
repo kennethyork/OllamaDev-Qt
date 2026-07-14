@@ -161,16 +161,21 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG="v$(sed -n 's/.*ODV_VERSION "\([0-9.]*\)".*/\1/p' core/Version.h)"
           fi
-          # A manual dispatch has no tag object yet — point one at this commit so
-          # the release has something to hang on, and re-publish (clobber) if the
-          # release already exists.
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          git tag -f "$TAG" && git push -f origin "$TAG"
-          gh release create "$TAG" \
-            --title "OllamaDev-Qt $TAG" \
-            --latest \
-            --notes-file RELEASE_NOTES.md \
-            dist/OllamaDev-x86_64.AppImage \
-            build/ollamadev-*.tar.gz \
-            build/ollamadev-*.deb \
-            build/ollamadev-*.rpm
+          # Idempotent, DELETE-FREE publish. The old delete-then-recreate raced:
+          # two runs of the same version could interleave so one deleted the
+          # release the other had just published. Instead: create the release once
+          # (making its tag at this commit), or if it already exists just re-upload
+          # the assets with --clobber. Nothing is ever deleted, so a concurrent run
+          # can never leave the release missing.
+          ASSETS=(dist/OllamaDev-x86_64.AppImage build/ollamadev-*.tar.gz \
+                  build/ollamadev-*.deb build/ollamadev-*.rpm)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --title "OllamaDev-Qt $TAG" \
+              --notes-file RELEASE_NOTES.md --latest
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "OllamaDev-Qt $TAG" --latest \
+              --notes-file RELEASE_NOTES.md "${ASSETS[@]}" \
+              || gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          fi
