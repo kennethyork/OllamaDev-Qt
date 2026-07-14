@@ -128,54 +128,64 @@ jobs:
     permissions:
       contents: write
     steps:
+      # fetch-depth 0 + tags so we can see the latest released version to bump from.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --tags --force >/dev/null 2>&1 || true
+          # A tag push or a manual dispatch publishes that EXACT version. A plain
+          # push to main AUTO-INCREMENTS: patch+1 over the latest released version
+          # of this major.minor, or the base version in Version.h when the
+          # major.minor changed (a Version.h bump starts a fresh minor).
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          if [ -z "$TAG" ]; then
+            BASE="$(sed -n 's/.*ODV_VERSION "\([0-9.]*\)".*/\1/p' core/Version.h)"
+            BMM="${BASE%.*}"                       # base major.minor, e.g. 0.2
+            LATEST="$(git tag -l "v${BMM}.*" --sort=-v:refname | head -1)"
+            if [ -n "$LATEST" ]; then
+              p="${LATEST##*.}"; TAG="v${BMM}.$((p + 1))"   # patch + 1
+            else
+              TAG="v${BASE}"                       # first release of this minor
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "num=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "▸ releasing $TAG"
 
       - name: Install Qt6 + toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake qt6-base-dev qt6-base-dev-tools qt6-webengine-dev qt6-webengine-dev-tools qt6-declarative-dev \
-            libgl1-mesa-dev libxkbcommon-x11-0 xvfb file desktop-file-utils squashfs-tools
+            libgl1-mesa-dev libxkbcommon-x11-0 xvfb file desktop-file-utils squashfs-tools rpm
 
       - name: Build artifacts
+        env:
+          ODV_RELEASE_VERSION: ${{ steps.ver.outputs.num }}
         run: |
-          sudo apt-get install -y --no-install-recommends rpm
           scripts/build-appimage.sh
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DODV_RELEASE_VERSION="$ODV_RELEASE_VERSION"
           cmake --build build -j"$(nproc)"
           (cd build && cpack -G "TGZ;DEB;RPM")
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          # Built on ubuntu-22.04 so the glibc floor is 2.35. Building this on
-          # ubuntu-latest would silently raise the floor and the AppImage would
-          # refuse to start on Mint 21 — with no warning until a user reports it.
-          #
-          # TAG comes from: the dispatch input, else the pushed tag, else — on a
-          # plain push to main — the version baked into core/Version.h. So every
-          # main push publishes/updates that version's release.
-          TAG="${{ github.event.inputs.tag }}"
-          if [ -z "$TAG" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; fi
-          if [ -z "$TAG" ]; then
-            TAG="v$(sed -n 's/.*ODV_VERSION "\([0-9.]*\)".*/\1/p' core/Version.h)"
-          fi
-          # Idempotent, DELETE-FREE publish. The old delete-then-recreate raced:
-          # two runs of the same version could interleave so one deleted the
-          # release the other had just published. Instead: create the release once
-          # (making its tag at this commit), or if it already exists just re-upload
-          # the assets with --clobber. Nothing is ever deleted, so a concurrent run
-          # can never leave the release missing.
+          # Every push cuts a NEW version, so the tag is unique and there is no
+          # delete/clobber race. Create it at this commit; the || branch just
+          # re-uploads if a retry finds it already there.
           ASSETS=(dist/OllamaDev-x86_64.AppImage build/ollamadev-*.tar.gz \
                   build/ollamadev-*.deb build/ollamadev-*.rpm)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${ASSETS[@]}" --clobber
-            gh release edit "$TAG" --title "OllamaDev-Qt $TAG" \
-              --notes-file RELEASE_NOTES.md --latest
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" \
-              --title "OllamaDev-Qt $TAG" --latest \
-              --notes-file RELEASE_NOTES.md "${ASSETS[@]}" \
-              || gh release upload "$TAG" "${ASSETS[@]}" --clobber
-          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" \
+            --title "OllamaDev-Qt $TAG" --latest \
+            --notes-file RELEASE_NOTES.md "${ASSETS[@]}" \
+            || gh release upload "$TAG" "${ASSETS[@]}" --clobber

@@ -22,6 +22,13 @@ if(ODV_BUILD_ADE)
 endif()
 find_package(Qt6 6.2 REQUIRED COMPONENTS ${ODV_QT_COMPONENTS})
 
+# CI passes -DODV_RELEASE_VERSION=x.y.z (the auto-incremented release version) so
+# the binaries and packages report the real published version. Empty → the value
+# baked into core/Version.h is used.
+if(DEFINED ODV_RELEASE_VERSION AND NOT ODV_RELEASE_VERSION STREQUAL "")
+    add_compile_definitions(ODV_VERSION="${ODV_RELEASE_VERSION}")
+endif()
+
 # qt_standard_project_setup() arrived in Qt 6.3, but our glibc floor is Ubuntu
 # 22.04, which ships Qt 6.2. Everything it would set for us (AUTOMOC, C++ standard)
 # is already set above, so it is a nicety, not a requirement — take it when the
@@ -60,7 +67,11 @@ endif()
 
 set(CPACK_PACKAGE_NAME "ollamadev")
 set(CPACK_PACKAGE_VENDOR "OllamaDev")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+if(DEFINED ODV_RELEASE_VERSION AND NOT ODV_RELEASE_VERSION STREQUAL "")
+    set(CPACK_PACKAGE_VERSION "${ODV_RELEASE_VERSION}")
+else()
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+endif()
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Local AI coding agent — Ollama and every major coding CLI, in parallel")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/kennethyork/OllamaDev")

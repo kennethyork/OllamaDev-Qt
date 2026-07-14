@@ -43,7 +43,8 @@ echo "▸ building…"
 # quietly falling back to the reader — so this can NEVER silently ship a
 # reader-only AppImage when we asked for the full browser.
 if ! cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DODV_BUILD_ADE=ON \
-           -DODV_WEBENGINE=ON -DODV_WEBENGINE_REQUIRED=ON > "$ROOT/.build/cfg.log" 2>&1; then
+           -DODV_WEBENGINE=ON -DODV_WEBENGINE_REQUIRED=ON \
+           -DODV_RELEASE_VERSION="${ODV_RELEASE_VERSION:-}" > "$ROOT/.build/cfg.log" 2>&1; then
   echo "✗ configure failed — the full browser needs QtWebEngine. Missing dep:" >&2
   grep -iE 'webengine|could not find|error' "$ROOT/.build/cfg.log" | head -6 >&2
   exit 1
