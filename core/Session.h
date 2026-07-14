@@ -37,6 +37,22 @@ public:
     static QVector<SessionMeta> list();  // newest first
     static bool remove(const QString& id);
 
+    // ---- portability -------------------------------------------------------
+    // The session's own on-disk JSON, verbatim — which is the highest-fidelity
+    // export there is, because it is exactly what the app reads back.
+    //
+    // The PHP export hand-rolled {id, messages, model} and so DROPPED tool_calls,
+    // meaning a session with any tool use in it did not survive a round trip: the
+    // assistant turns still said "I called edit()" and the correlation to the tool
+    // results was gone. It also dropped the title, the cwd, and every timestamp.
+    static QJsonObject exportOne(const QString& id);
+
+    // Import always MINTS A NEW ID, so it can never clobber a session you have —
+    // there is no collision to resolve, by construction. Everything else (messages
+    // with their tool calls, model, backend, title) is preserved. Returns the new
+    // id, or empty on failure.
+    static QString importOne(const QJsonObject& o, const QString& cwd, QString* err = nullptr);
+
     QString id() const { return id_; }
     QVector<ChatMessage>& messages() { return messages_; }
     const QVector<ChatMessage>& messages() const { return messages_; }

@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSaveFile>
 #include <QJsonObject>
 #include <QProcess>
 #include <QTextStream>
@@ -40,6 +41,7 @@
 #include "Verify.h"
 #include "Vision.h"
 #include "Plugins.h"
+#include "Update.h"
 #include "Workspaces.h"
 #include "Version.h"
 #include "Watch.h"
@@ -381,9 +383,167 @@ int cmdCrew(const QStringList& args) {
     return runCrewAndReport(o);
 }
 
-// --------------------------------------------------------------------- plugins
+// ----------------------------------------------- update / export / import
 
 bool askYesNo(const QString& prompt);  // defined below, next to the other prompts
+
+int cmdUpdate(const QStringList& args) {
+    out() << "checking…\n";
+    out().flush();
+    const UpdateInfo u = Update::check();
+    if (!u.ok) {
+        err() << "could not check: " << u.error << "\n";
+        err().flush();
+        return 1;
+    }
+    if (!u.newer) {
+        out() << "you are on " << u.current << " — that is the latest\n";
+        out().flush();
+        return 0;
+    }
+
+    out() << u.current << " → " << u.latest << "  (" << u.assetName << ", "
+          << (u.assetSize / 1024 / 1024) << " MB)\n";
+    if (!u.notes.trimmed().isEmpty()) out() << "\n" << u.notes.trimmed().left(600) << "\n\n";
+    out() << "replaces: " << u.target << "\n";
+    out().flush();
+
+    // Dry by default. Overwriting the running binary is not a thing to do because
+    // somebody typed a command that sounded like a question.
+    if (!hasFlag(args, "--install")) {
+        out() << "\ninstall it:  ollamadev update --install\n";
+        out().flush();
+        return 0;
+    }
+    if (!hasFlag(args, "--yes") && !askYesNo(QStringLiteral("replace it now?"))) {
+        out() << "left alone\n";
+        out().flush();
+        return 0;
+    }
+
+    QString e;
+    const bool done = Update::install(u, &e, [](qint64 got, qint64 total) {
+        if (total <= 0) return;
+        out() << "\r  " << (got * 100 / total) << "%   ";
+        out().flush();
+    });
+    out() << "\n";
+    out().flush();
+    if (!done) {
+        err() << "update failed: " << e << "\n";
+        err().flush();
+        return 1;
+    }
+    out() << "✓ now on " << u.latest << "\n";
+    out().flush();
+    return 0;
+}
+
+int cmdExport(const QStringList& args) {
+    const QStringList pos = positionals(args);
+    const bool all = hasFlag(args, "--all");
+
+    QStringList ids;
+    if (all) {
+        for (const SessionMeta& m : Session::list()) ids << m.id;
+    } else if (!pos.isEmpty()) {
+        ids << pos.first();
+    } else {
+        const auto list = Session::list();  // newest first
+        if (list.isEmpty()) {
+            err() << "no sessions to export\n";
+            err().flush();
+            return 1;
+        }
+        ids << list.first().id;
+    }
+
+    QJsonArray sessions;
+    for (const QString& id : ids) {
+        const QJsonObject o = Session::exportOne(id);
+        if (o.isEmpty()) {
+            err() << "no session '" << id << "'\n";
+            err().flush();
+            return 1;
+        }
+        sessions.append(o);
+    }
+
+    // A self-describing bundle, not a bare session: `kind` and `version` are what
+    // let import tell an OllamaDev export from any other JSON you point it at.
+    const QJsonObject bundle{{"kind", "ollamadev-export"},
+                             {"version", 1},
+                             {"exported", QDateTime::currentSecsSinceEpoch()},
+                             {"sessions", sessions}};
+
+    QString path = flagValue(args, "--out");
+    if (path.isEmpty())
+        path = all ? QStringLiteral("ollamadev-export-all.json")
+                   : QStringLiteral("ollamadev-export-%1.json").arg(ids.first());
+
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) {
+        err() << "cannot write " << path << "\n";
+        err().flush();
+        return 1;
+    }
+    f.write(QJsonDocument(bundle).toJson(QJsonDocument::Indented));
+    if (!f.commit()) {
+        err() << "cannot write " << path << "\n";
+        err().flush();
+        return 1;
+    }
+    out() << "✓ " << sessions.size() << " session(s) → " << path << "\n";
+    out().flush();
+    return 0;
+}
+
+int cmdImport(const QStringList& args) {
+    const QString path = positionals(args).value(0);
+    QFile f(path);
+    if (path.isEmpty() || !f.open(QIODevice::ReadOnly)) {
+        err() << "usage: ollamadev import <file.json>\n";
+        err().flush();
+        return 2;
+    }
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    if (o.isEmpty()) {
+        err() << "not JSON\n";
+        err().flush();
+        return 1;
+    }
+
+    // Take a bundle, or a single bare session — which is what a hand-copied session
+    // file, or an export from the PHP app, looks like.
+    QJsonArray sessions = o.value(QStringLiteral("sessions")).toArray();
+    if (sessions.isEmpty() && o.contains(QStringLiteral("messages"))) sessions.append(o);
+    if (sessions.isEmpty()) {
+        err() << "no sessions in " << path << "\n";
+        err().flush();
+        return 1;
+    }
+
+    int n = 0;
+    for (const QJsonValue& v : sessions) {
+        QString e;
+        // Always a NEW id: an import can never overwrite a session you already have,
+        // so there is no collision to resolve.
+        const QString id = Session::importOne(v.toObject(), QDir::currentPath(), &e);
+        if (id.isEmpty()) {
+            err() << "skipped one: " << e << "\n";
+            err().flush();
+            continue;
+        }
+        ++n;
+        out() << "  " << id << "  "
+              << v.toObject().value(QStringLiteral("messages")).toArray().size() << " messages\n";
+    }
+    out() << "✓ imported " << n << " session(s) — open one: ollamadev load <id>\n";
+    out().flush();
+    return n > 0 ? 0 : 1;
+}
+
+// --------------------------------------------------------------------- plugins
 
 int cmdPlugin(const QStringList& args) {
     const QString sub = args.value(0);
@@ -2714,6 +2874,9 @@ int main(int argc, char** argv) {
     if (cmd == "board") return cmdBoard(rest);
     if (cmd == "ws" || cmd == "workspace") return cmdWorkspace(rest);
     if (cmd == "plugin" || cmd == "plugins") return cmdPlugin(rest);
+    if (cmd == "update" || cmd == "upgrade") return cmdUpdate(rest);
+    if (cmd == "export") return cmdExport(rest);
+    if (cmd == "import") return cmdImport(rest);
     if (cmd == "scan") return cmdScan(rest);
     if (cmd == "voice") return cmdVoice(rest);
     if (cmd == "transcribe") return cmdTranscribe(rest);

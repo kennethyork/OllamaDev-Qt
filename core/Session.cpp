@@ -157,6 +157,49 @@ bool Session::remove(const QString& id) {
     return QFile::remove(pathFor(id));
 }
 
+QJsonObject Session::exportOne(const QString& id) {
+    QFile f(pathFor(id));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(f.readAll()).object();
+}
+
+QString Session::importOne(const QJsonObject& o, const QString& cwd, QString* err) {
+    const QJsonArray msgs = o.value(QStringLiteral("messages")).toArray();
+    if (msgs.isEmpty()) {
+        if (err) *err = QStringLiteral("no messages in it");
+        return {};
+    }
+
+    Session s = Session::create(cwd);
+    // Decode and re-encode through the SAME codec the app uses, so tool calls,
+    // tool ids, thinking and attached images all survive. (The PHP import replayed
+    // only role+content, which quietly destroyed the tool-call correlation.)
+    for (const QJsonValue& v : msgs)
+        if (v.isObject()) s.messages_.append(decodeMessage(v.toObject()));
+
+    const QString model = o.value(QStringLiteral("model")).toString();
+    const QString backend = o.value(QStringLiteral("backend")).toString();
+    if (!model.isEmpty()) s.model_ = model;
+    if (!backend.isEmpty()) s.backend_ = backend;
+    s.save();
+
+    // save() derives a title from the first user message, so an imported session
+    // is titled the same way a fresh one is — but an explicit exported title is
+    // better than a derived one, so it wins.
+    const QString title = o.value(QStringLiteral("title")).toString();
+    if (!title.isEmpty()) {
+        s.title_ = title;
+        QJsonObject raw = exportOne(s.id_);
+        raw.insert(QStringLiteral("title"), title);
+        QSaveFile f(pathFor(s.id_));
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(QJsonDocument(raw).toJson(QJsonDocument::Indented));
+            f.commit();
+        }
+    }
+    return s.id_;
+}
+
 void Session::save() {
     ensureDir();
     updated_ = QDateTime::currentSecsSinceEpoch();

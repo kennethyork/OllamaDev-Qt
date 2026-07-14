@@ -6,6 +6,7 @@
 #include <QTextStream>
 #include <QThread>
 
+#include <QJsonArray>
 #include <QProcess>
 
 #include "Backend.h"
@@ -17,6 +18,8 @@
 #include "Plugins.h"
 #include "Sandbox.h"
 #include "SecScan.h"
+#include "Session.h"
+#include "Update.h"
 #include "Tools.h"
 #include "Crew.h"
 #include "Vision.h"
@@ -689,6 +692,91 @@ static void testPlugins() {
     qputenv("HOME", realHome);
 }
 
+// export/import must survive a session that USED TOOLS.
+//
+// The PHP export hand-rolled {id, messages, model} and replayed only role+content
+// on import, so tool_calls were dropped: the assistant turns still said "I called
+// edit()" and the tool results they correlated to were gone. A model reading that
+// transcript is being lied to. Here the export IS the session's own on-disk JSON,
+// and import decodes it through the same codec the app uses.
+static void testExportImport() {
+    QTemporaryDir proj;
+    if (!proj.isValid()) {
+        check(false, "temp project for the export test");
+        return;
+    }
+    const QString cwd = QDir::currentPath();
+    QDir::setCurrent(proj.path());  // sessions live under the PROJECT's .ollamadev
+
+    Session s = Session::create(proj.path());
+    ChatMessage user;
+    user.role = QStringLiteral("user");
+    user.content = QStringLiteral("fix the parser");
+    ChatMessage asst;
+    asst.role = QStringLiteral("assistant");
+    asst.content = QStringLiteral("editing it now");
+    asst.toolCalls = QJsonArray{QJsonObject{
+        {"id", "call_1"},
+        {"function", QJsonObject{{"name", "edit"}, {"arguments", "{\"file_path\":\"p.cpp\"}"}}}}};
+    ChatMessage tool;
+    tool.role = QStringLiteral("tool");
+    tool.toolCallId = QStringLiteral("call_1");
+    tool.toolName = QStringLiteral("edit");
+    tool.content = QStringLiteral("edited p.cpp");
+    s.messages() << user << asst << tool;
+    s.setModel(QStringLiteral("qwen3.5:9b"));
+    s.save();
+
+    const QJsonObject bundle = Session::exportOne(s.id());
+    check(!bundle.isEmpty() && bundle.value("messages").toArray().size() == 3,
+          "export carries every message");
+
+    QString err;
+    const QString newId = Session::importOne(bundle, proj.path(), &err);
+    check(!newId.isEmpty() && newId != s.id(),
+          "import mints a NEW id — it can never clobber a session you have");
+
+    auto back = Session::load(newId);
+    check(back.has_value() && back->messages().size() == 3, "…and every message came back");
+    if (back.has_value()) {
+        const ChatMessage& a = back->messages().at(1);
+        const ChatMessage& t = back->messages().at(2);
+        check(!a.toolCalls.isEmpty(), "THE TOOL CALL SURVIVES the round trip (PHP dropped it)");
+        check(t.toolCallId == QStringLiteral("call_1") && t.toolName == QStringLiteral("edit"),
+              "…and the tool result still correlates to the call that made it");
+        check(back->model() == QStringLiteral("qwen3.5:9b"), "the model survives too");
+    }
+
+    QDir::setCurrent(cwd);
+}
+
+// Overwriting the running binary is the one operation you do not get to be casual
+// about: if it goes wrong the user has no working tool left to fix it with. These
+// are asserted against the source because they are properties of the FAILURE
+// paths, which a happy-path download would never exercise.
+static void testUpdateSafety() {
+    const QString src = readSource(QStringLiteral("core/Update.cpp"));
+    check(src.contains("applicationFilePath"),
+          "update resolves the running binary, never argv[0] (a symlink names something else)");
+    check(src.contains("canonicalFilePath"), "…and canonicalises it");
+    check(src.contains("blob.size() != info.assetSize"),
+          "a short download is refused — a truncated binary is a brick");
+    check(src.contains(".bak") && src.contains("QFile::rename(backup, info.target)"),
+          "the old binary is kept and PUT BACK if the swap fails");
+    check(src.contains("info.target + QStringLiteral(\".new\")"),
+          "the new binary is staged NEXT TO the target — a rename across filesystems fails");
+    check(src.contains("isWritable"),
+          "it checks it can write BEFORE downloading 40MB into a root-owned directory");
+    // The PHP fell back to assets[0] when it found no asset for this platform,
+    // which installs another architecture's binary.
+    check(src.contains("has no asset for this machine"),
+          "no asset for THIS os/arch is an error, never a fallback to some other one");
+
+    QString err;
+    UpdateInfo empty;
+    check(!Update::install(empty, &err), "install refuses when there is nothing to install");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -708,6 +796,8 @@ int main(int argc, char** argv) {
     s << "crew-steer\n";  s.flush(); testCrewSteer();
     s << "workspaces\n"; s.flush(); testWorkspaces();
     s << "plugins\n";    s.flush(); testPlugins();
+    s << "export\n";     s.flush(); testExportImport();
+    s << "update\n";     s.flush(); testUpdateSafety();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();
