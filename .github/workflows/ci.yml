@@ -134,7 +134,7 @@ jobs:
           # refuse to start on Mint 21 — with no warning until a user reports it.
           gh release create "${GITHUB_REF_NAME}" \
             --title "OllamaDev-Qt ${GITHUB_REF_NAME}" \
-            --prerelease \
+            --latest \
             --notes-file RELEASE_NOTES.md \
             dist/OllamaDev-x86_64.AppImage \
             build/ollamadev-*.tar.gz \

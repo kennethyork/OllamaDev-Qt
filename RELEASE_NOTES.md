@@ -1,103 +1,78 @@
-# OllamaDev-Qt v0.1.0 — pre-release
+# OllamaDev-Qt v0.2.0
 
-A C++20 / Qt6 rewrite of [OllamaDev](https://github.com/kennethyork/OllamaDev) (PHP CLI +
-BosonPHP webview desktop app). Two binaries out of one engine:
+A C++20 / Qt6 rewrite of [OllamaDev](https://github.com/kennethyork/OllamaDev). Two binaries
+from one engine: **`ollamadev`** (the CLI) and **`ollamadev-ade`** (the desktop app — infinite
+canvas, native terminals, crew board). Qt is the only dependency.
 
-- **`ollamadev`** — the CLI. Qt Core + Network, no GUI dependency.
-- **`ollamadev-ade`** — the desktop app. Infinite canvas, native terminals, crew board.
+Broad and tested — 36 self-tests, every feature verified end-to-end. See "Known gaps" at the
+bottom for what is deliberately out of scope in this release.
 
-**This is a pre-release.** The engine is better than the PHP original in ways that are measured
-below; it also has a few hours of mileage against the original's months. Treat it as something to
-try, not yet as a drop-in replacement.
+## What's new since v0.1.0
 
-## Dependencies
+**The routing "brain".** The crew can auto-pick each role's model by difficulty — a small local
+model for trivia, a strong/cloud model for hard design/debug work — instead of running everything
+on one model.
+- `ollamadev route [--run] "…"` — show (or run) which model the brain picks, and why.
+- `ollamadev crew "…" --route` — auto-assign every role's model. The Director and Auditor reason
+  *hard*, the Researcher *moderate*, and each coder is routed on *its own subtask's* difficulty.
+- The desktop **🧠 Brain** pane visualises the whole thing: all 14 crew faculties
+  (Researcher → Router → Director → Roles → Skills → Coders → Auditor → Debate/Dedupe/Security →
+  Secret gate → Overlap guard → Landing → Memory), a live classifier you type into, the running
+  crew's routed model plan, and the token split.
 
-Qt 6 and a C++20 compiler. That is the entire list — no third-party libraries anywhere, which is
-the same constraint the PHP version held, carried across:
+**MDASH-style crew modes — all opt-in, the plain crew is unchanged.**
+- `--debate` — advocate vs skeptic vs judge argue each changeset before it lands.
+- `--dedupe` — hold coders whose work duplicates another's.
+- `--security` — a read-only vulnerability hunt that writes a report (and shows scanners on the
+  kanban board).
+- `--swarm N` — raise the coder cap for a bigger fan-out.
+- `--learn` — the crew compounds across runs: it folds past runs' memory + skills into its context
+  before working, and distils what it learned into durable memory (and a reusable skill) after.
 
-- `QRegularExpression` **is** PCRE2, so the tool-call parsers and secret scanner port directly.
-- `QJsonDocument` replaces a JSON library, `QProcess` drives the coding CLIs.
-- `forkpty()` gives us the terminal — no `script(1)`, no libvterm, no QTermWidget.
+**Token-efficiency report.** Every crew run prints tokens per model and the **free-local vs
+paid-cloud** split — the number that maps to a bill. The Brain pane shows it live.
+
+**A real browser.** The Browser pane uses **QtWebEngine** (full Chromium — JS, CSS, media) when
+built with it; without it, it falls back to a lightweight JavaScript-free reader so a lean build
+still works. Build with `qt6-webengine-dev` installed for the full browser.
+
+**Per-CLI terminals.** Add → CLI terminal opens a terminal straight into any installed CLI —
+**ollamadev** (this app's own REPL) first, then Claude Code, Codex, Gemini, Cursor Agent, OpenCode,
+Qwen Code. The desktop drives its own C++ `ollamadev`, resolved by path, never a stale build on
+your PATH.
+
+**Plus the full parity wave:** `pull`, `setup`, `config get/set`, `models presets/cloud/chain`,
+session `load`/`resume`, `chat` threads, `completion` scripts, vision/`@image`, the `task`/subagent
+tool, custom agent personas, output-styles, statusline, a usage meter, the context tuner, and all
+the desktop panes (memory graph, crew topology, code-search, voice, agent-team, tasks, start) plus
+the Ctrl-K command palette, the management dialogs, and the theme editor with 37 themes.
 
 ## Ollama and every major coding CLI, in parallel
 
-Ollama is the default and stays first — it is the only local, free, offline-capable provider, and
-the reason the project exists. Everything else is opt-in.
+Ollama is the default and stays first. Every other CLI is opt-in. Each crew role can be a
+*different* model or backend — by hand or auto-routed — so one crew can mix Ollama, Claude, and
+Codex at once (verified end-to-end).
 
-```
-Backend        Installed  Native tools  Concurrency
-Ollama         yes        yes           2 local / 8 cloud
-Claude Code    yes        own loop      4
-Codex          yes        own loop      4
-Gemini CLI     yes        own loop      4
-Cursor Agent   yes        own loop      4
-OpenCode       yes        own loop      4
-Qwen Code      yes        own loop      4
-Aider · Goose · Amp · Crush · Droid — wired, gated on a PATH probe
-```
-
-"own loop" means the CLI does its own agentic work and its own file edits; we hand it a subtask and
-a sandbox and let it run. Routing is per role and per coder, so **one crew can mix providers**:
-
-```sh
-ollamadev crew "add OAuth and write the tests" \
-  --coder-backends ollama,claude,codex --coder-models qwen3.5:9b,,
-```
-
-## Parallelism is per backend, because the constraint is per backend
-
-This is the part worth being precise about. "Run N coders at once" means very different things
-depending on who does the inference:
-
-| Provider | Real limit | Why |
+| Provider | Concurrency | Why |
 |---|---|---|
-| Local Ollama, one GPU | ~2 | One `ollama serve` exposes `OLLAMA_NUM_PARALLEL` slots per loaded model. Past that, requests queue *inside Ollama* — you do not go faster, and each extra slot costs a full `num_ctx` KV cache of VRAM. |
-| Ollama cloud (`:cloud`) | ~8 | Inference runs on Ollama's servers. Your GPU is not involved. |
-| claude / codex / gemini / … | ~4 each | Separate processes, separate remote APIs. Bounded by rate limits, not your hardware. |
+| Local Ollama, one GPU | ~2 | `OLLAMA_NUM_PARALLEL` slots; past that you queue inside Ollama and each slot costs a KV cache |
+| Ollama cloud (`:cloud`) | ~8 | inference is on Ollama's servers, your GPU is idle |
+| claude / codex / gemini / … | ~4 each | separate processes, separate remote APIs |
 
-So four *local* coders is roughly 2×, not 4×. Four *cloud* coders genuinely is ~4×. A permit
-limiter keyed on backend + locality enforces this, so a mixed crew throttles each provider
-independently. Run `ollamadev backends` for your machine's real numbers.
-
-## What is better than the PHP version
-
-- **The crew is actually parallel.** PHP's parallel mode exists but is off by default (light mode
-  defaults on and silently gates it), and even enabled it is a wave pool that stalls on the slowest
-  coder in each chunk. Here every coder is a thread and the throttle is admission control.
-- **The serial overhead is gone.** Sandbox copies (N full tree copies, all in the parent *before
-  any coder started*), changeset capture (byte-comparing every file of both trees), and the N
-  audits were all serial. Now threaded, with a size+mtime prefilter.
-- **Real diffs.** The PHP `fileDiff` was not a diff — it emitted every old line as `-` and every
-  new line as `+`, then truncated to 16 KB before the auditor saw it, so on a large file the
-  auditor could literally miss the change. Now a Myers diff, verified by round-tripping through
-  `git apply`.
-- **Real terminals.** PHP shelled out to `script(1)`, bridged the pty through two files polled
-  every 12–150 ms, and resized it by walking `/proc/<pid>/fd/0` to run `stty -F`. Here:
-  `forkpty()`, a `QSocketNotifier`, and `ioctl(TIOCSWINSZ)`. Event-driven, no polling.
-- **A second instance no longer kills the first one's terminals.** The PHP app ran
-  `pkill -9 -f '__pty-daemon__'` and `rm -rf ~/.ollamadev/terminals/*` on every boot. Every child
-  here is owned by handle, and a test fails the build if anyone reintroduces a kill-by-name.
-
-## Still no git
-
-Each coder works in a copied sandbox and produces a changeset (a manifest plus a mirror of the
-changed files). Accepting one copies those files into your folder, creating any missing
-directories. No worktrees, no branches, no merges — the crew runs in any folder, repo or not.
-
-Overlap between coders is caught at the path level, first-writer-wins; the loser is held with its
-diff intact rather than merged. A changeset that introduces a credential is never auto-applied, no
-matter how clean the audit was.
+Run `ollamadev backends` for your machine's real numbers.
 
 ## Known gaps
 
-Not yet ported from the PHP app: chat threads, checkpoints/undo, workspaces in the CLI, subagents,
-vision, plugins, tmux panes, self-update, the desktop's full theme set and voice-command grammar.
-There is no Windows build yet.
+The models themselves never get smarter — the `--learn` loop improves the *harness* (memory +
+skills), not the weights. Release binaries ship the reader browser fallback; the full QtWebEngine
+browser comes from a source build with `qt6-webengine-dev`. No macOS or Windows build in this
+release (Linux only). The security-scan mode is scoped to this project's scale, not a 100-agent
+harness.
 
 ## Install
 
-Download the AppImage (built on Ubuntu 22.04, so glibc 2.35 and newer), or the `.deb`/`.tar.gz`.
-Building from source needs `qt6-base-dev` and CMake 3.21+:
+Download the `.deb`, `.rpm`, `.AppImage`, or `.tar.gz` (built on Ubuntu 22.04, glibc 2.35 floor —
+runs on Mint 21 and newer). From source:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
