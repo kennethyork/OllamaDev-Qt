@@ -87,7 +87,7 @@ QStringList positionals(const QStringList& a) {
         "--director-backend", "--director-model",
         "--auditor-backend", "--auditor-model",
         "--researcher-backend", "--researcher-model",
-        "--session"};
+        "--session",         "--swarm"};
     QStringList out;
     for (int i = 0; i < a.size(); ++i) {
         const QString& t = a.at(i);
@@ -129,7 +129,14 @@ void printHelp() {
           << "  ollamadev crew discard <n>   throw held work away\n"
           << "  ollamadev crew steer <n> \"…\" talk to a running coder\n"
           << "  ollamadev crew role|pack     personas the Director assigns · saved crew configs\n"
-          << "  ollamadev board              pending decisions\n\n"
+          << "  ollamadev board              pending decisions\n"
+          << "  crew brain options (all opt-in — plain crew is unchanged):\n"
+          << "    --route                    auto-pick each role's model by difficulty\n"
+          << "    --debate                   advocate/skeptic/judge vote per changeset\n"
+          << "    --dedupe                   hold coders whose work duplicates another's\n"
+          << "    --security                 read-only vulnerability scan → a report\n"
+          << "    --swarm N                  raise the coder cap for a bigger fan-out\n"
+          << "  ollamadev route [--run] \"…\"  show (or run) which model the brain picks\n\n"
           << "Context:\n"
           << "  ollamadev index build        semantic code index (also: status, clear)\n"
           << "  ollamadev code-search \"<q>\"  search the repo by meaning\n"
@@ -235,6 +242,10 @@ int cmdCrew(const QStringList& args) {
     o.research = !hasFlag(args, "--no-research");
     o.audit = !hasFlag(args, "--no-audit");
     o.route = hasFlag(args, "--route");  // auto-pick each role's model by difficulty
+    o.debate = hasFlag(args, "--debate");    // advocate/skeptic/judge per changeset
+    o.dedupe = hasFlag(args, "--dedupe");    // hold coders whose work duplicates another's
+    o.security = hasFlag(args, "--security"); // read-only vulnerability scan (no code changes)
+    o.swarmMax = flagValue(args, "--swarm", "0").toInt();  // raise the coder cap
     o.land = hasFlag(args, "--review") ? "review" : Config::str("crew.land", "auto");
     o.coderBackend = flagValue(args, "--coder-backend");
     o.coderModel = flagValue(args, "--coder-model");

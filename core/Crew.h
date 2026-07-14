@@ -65,6 +65,25 @@ struct CrewOptions {
     // Claude/Codex coder already brings its own model. An explicit --*-model always
     // wins over the router.
     bool route = false;
+
+    // --- MDASH-style options, all OPT-IN. With none of these set, the crew runs
+    // exactly as before. ---
+
+    // Replace the single Auditor verdict with a 3-agent debate (advocate vs
+    // skeptic vs judge) per changeset — a contested change survives an argument
+    // before it lands.
+    bool debate = false;
+
+    // Detect coders whose work DUPLICATES another's (same feature in different
+    // files) and hold the redundant ones, beyond the always-on path-overlap guard.
+    bool dedupe = false;
+
+    // Security-scan mode: the crew does not write code — it hunts vulnerabilities
+    // (read-only) and produces a findings report.
+    bool security = false;
+
+    // Raise the coder cap for a bigger swarm (0 → the default cap of 8).
+    int swarmMax = 0;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI
@@ -92,6 +111,12 @@ public:
     };
 
     static Result run(const CrewOptions& opts, const CrewEvents& ev, const CancelToken& cancel);
+
+    // Security-scan mode (opts.security). Read-only vulnerability hunt over the
+    // project; writes a findings report and returns its runId. run() delegates
+    // here when opts.security is set, so the regular crew is untouched.
+    static Result securityScan(const CrewOptions& opts, const CrewEvents& ev,
+                               const CancelToken& cancel);
 
     // Held work, decided later by a human from the board.
     static bool accept(int n, QString* err = nullptr);

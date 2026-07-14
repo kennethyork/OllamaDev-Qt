@@ -73,6 +73,19 @@ void Usage::record(const QString& model, int promptTokens, int evalTokens) {
     }
 }
 
+QMap<QString, Usage::Tally> Usage::snapshot() {
+    QMutexLocker lock(&mutex());
+    QMap<QString, Tally> out;
+    const QJsonObject models = readUsage().value(QStringLiteral("models")).toObject();
+    for (auto it = models.constBegin(); it != models.constEnd(); ++it) {
+        const QJsonObject m = it.value().toObject();
+        out.insert(it.key(),
+                   Tally{m.value(QStringLiteral("prompt")).toInt(),
+                         m.value(QStringLiteral("eval")).toInt()});
+    }
+    return out;
+}
+
 QString Usage::report() {
     QMutexLocker lock(&mutex());
     const QJsonObject root = readUsage();

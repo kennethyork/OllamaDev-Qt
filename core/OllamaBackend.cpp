@@ -19,6 +19,7 @@
 #include "Config.h"
 #include "Json.h"
 #include "Models.h"
+#include "Usage.h"
 
 namespace odv {
 
@@ -553,12 +554,14 @@ QJsonObject OllamaBackend::chatJson(const QString& model, const QVector<ChatMess
     const HttpResult r = postRetry("/api/chat", json::encode(body), timeoutMs, &cancel);
     if (r.status != 200 || r.netError != 0) return {};
 
-    const QString content = QJsonDocument::fromJson(r.body)
-                                .object()
-                                .value("message")
-                                .toObject()
-                                .value("content")
-                                .toString();
+    const QJsonObject root = QJsonDocument::fromJson(r.body).object();
+    // Meter these too: the Director, Auditor, debate and dedupe all go through
+    // chatJson, and a token report that ignored them would undercount the crew.
+    Usage::record(model, root.value("prompt_eval_count").toInt(),
+                  root.value("eval_count").toInt());
+
+    const QString content =
+        root.value("message").toObject().value("content").toString();
     if (content.isEmpty()) return {};
 
     // Even with format:json, cloud models fence their reply in ```json … ```, so

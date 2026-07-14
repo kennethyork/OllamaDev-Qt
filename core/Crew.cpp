@@ -10,6 +10,8 @@
 #include <QThread>
 #include <QUuid>
 
+#include <algorithm>
+
 #include "Agent.h"
 #include "Board.h"
 #include "Config.h"
@@ -20,6 +22,7 @@
 #include "SecScan.h"
 #include "Skills.h"
 #include "Tools.h"
+#include "Usage.h"
 
 namespace odv {
 
@@ -80,6 +83,8 @@ void publishBoard(const QString& runId, const QString& task, const QVector<Subta
 }  // namespace
 
 Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const CancelToken& cancel) {
+    if (opts.security) return securityScan(opts, ev, cancel);
+
     Result out;
     const QString projectRoot = QDir::currentPath();
     const QString runId = newRunId();
@@ -87,6 +92,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
     const QString sessionBackend = Config::str("model.backend", "ollama");
     const QString sessionModel = Config::str("ollama.defaultModel", "");
+
+    // Token accounting baseline — the report at the end is this run's delta.
+    const QMap<QString, Usage::Tally> usageBefore = Usage::snapshot();
 
     auto phase = [&](const QString& p, const QString& m) {
         if (ev.onPhase) ev.onPhase(p, m);
@@ -133,7 +141,10 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
     // ---- Director: decompose into independent, non-overlapping subtasks ----
     phase("plan", "director is decomposing the task");
-    const int maxCoders = qBound(1, opts.maxCoders, 8);
+    // Swarm mode raises the ceiling; the per-backend limiter still throttles real
+    // concurrency, so a big number just means more queued work, not more GPU load.
+    const int cap = opts.swarmMax > 0 ? qMin(opts.swarmMax, 64) : 8;
+    const int maxCoders = qBound(1, opts.maxCoders, cap);
     QVector<Subtask> subs;
     {
         const QString db = backendFor(opts.directorBackend);
@@ -404,6 +415,93 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         for (auto& r : results) r.audit.clean = true;
     }
 
+    // ---- Debate (opt-in) --------------------------------------------------
+    // A contested change should survive an argument, not one model's snap verdict.
+    // Advocate argues to land it, Skeptic argues to hold it, Judge decides — the
+    // MDASH "debate" stage, scoped to one changeset. Runs in parallel per coder,
+    // and its verdict overrides the single auditor's.
+    if (opts.debate && !cancel.cancelled()) {
+        phase("debate", "arguing every changeset");
+        const QString jb = backendFor(opts.auditorBackend);
+        const QString jm = routedForTier(jb, opts.auditorModel, QStringLiteral("hard"));
+        parallelRun(
+            results.size(), [&](int) { return limiterKey(jb, jm); },
+            [&](int i) -> QJsonObject {
+                if (results[i].empty || cancel.cancelled()) return {};
+                auto backend = Backends::get(jb);
+                if (!backend) return {};
+                const QString subtask = subs[i].title;
+                const QString diff = results[i].diff.left(14000);
+
+                auto argue = [&](const QString& stance) -> QString {
+                    const QString sys =
+                        "You are a code reviewer in a debate. Argue the " + stance +
+                        " case ONLY, in 2-4 sentences — do not hedge. Reply with plain text.";
+                    const QString usr = "Subtask: " + subtask + "\n\nProposed change:\n" + diff;
+                    const QJsonObject r = backend->chatJson(
+                        jm,
+                        {{"system", sys + " Wrap your argument as {\"argument\":\"...\"}.", {}, {}, {}, {}, {}},
+                         {"user", usr, {}, {}, {}, {}, {}}},
+                        cancel);
+                    return r.value("argument").toString();
+                };
+                const QString forCase = argue(QStringLiteral("FOR landing this change"));
+                const QString againstCase = argue(QStringLiteral("AGAINST landing this change"));
+
+                const QString jsys =
+                    "You are the Judge of a code-review debate. Weigh both arguments against the "
+                    "actual diff and decide whether the change is safe to land. Reply with JSON "
+                    "only: {\"clean\":true|false,\"summary\":\"one line verdict\"}";
+                const QString jusr = "Subtask: " + subtask + "\n\nDiff:\n" + diff +
+                                     "\n\nADVOCATE:\n" + forCase + "\n\nSKEPTIC:\n" + againstCase;
+                const QJsonObject v = backend->chatJson(
+                    jm, {{"system", jsys, {}, {}, {}, {}, {}}, {"user", jusr, {}, {}, {}, {}, {}}},
+                    cancel);
+                results[i].audit.clean = v.value("clean").toBool(false);
+                results[i].audit.summary =
+                    QStringLiteral("[debate] ") + v.value("summary").toString();
+                return {};
+            });
+    }
+
+    // ---- Dedupe (opt-in) --------------------------------------------------
+    // The always-on overlap guard catches two coders touching the SAME file. This
+    // catches two coders doing the same WORK in DIFFERENT files (the Director
+    // occasionally hands out near-duplicate subtasks). A judge groups the
+    // changesets; every non-primary member of a duplicate group is marked so
+    // landing holds it. No model call when there is nothing that could overlap.
+    QHash<int, int> dupOf;  // coder n -> the coder it duplicates
+    if (opts.dedupe && !cancel.cancelled()) {
+        QVector<int> live;
+        for (int i = 0; i < results.size(); ++i)
+            if (!results[i].empty) live.append(i);
+        if (live.size() > 1) {
+            phase("dedupe", "checking for duplicated work");
+            const QString jb = backendFor(opts.directorBackend);
+            const QString jm = routedForTier(jb, opts.directorModel, QStringLiteral("hard"));
+            if (auto backend = Backends::get(jb)) {
+                QString listing;
+                for (int i : live)
+                    listing += QStringLiteral("coder #%1: %2 — files: %3\n")
+                                   .arg(subs[i].n)
+                                   .arg(subs[i].title, results[i].files.join(", "));
+                const QString sys =
+                    "Several coders worked in parallel. Identify groups that did the SAME work "
+                    "(duplicates), even in different files. Reply with JSON only: "
+                    "{\"duplicates\":[{\"keep\":<coder#>,\"drop\":[<coder#>,...]}]} — keep the "
+                    "most complete member of each group. Empty list if none duplicate.";
+                const QJsonObject v = backend->chatJson(
+                    jm, {{"system", sys, {}, {}, {}, {}, {}}, {"user", listing, {}, {}, {}, {}, {}}},
+                    cancel);
+                for (const auto& g : v.value("duplicates").toArray()) {
+                    const int keep = g.toObject().value("keep").toInt();
+                    for (const auto& d : g.toObject().value("drop").toArray())
+                        if (d.toInt() != keep) dupOf.insert(d.toInt(), keep);
+                }
+            }
+        }
+    }
+
     // ---- Landing ----------------------------------------------------------
     // Sequential and deterministic (coder order), because this is the only
     // place that writes to the user's tree and first-writer-wins must be
@@ -431,6 +529,13 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
     for (auto& r : results) {
         if (r.n == 0 || r.empty) continue;
+
+        // Dedupe verdict (only populated when --dedupe ran): a coder whose work
+        // duplicates another's is held rather than landed twice.
+        if (dupOf.contains(r.n)) {
+            hold(r, QStringLiteral("duplicates coder #%1").arg(dupOf.value(r.n)));
+            continue;
+        }
 
         // A changeset that introduces a credential is NEVER auto-applied, no
         // matter how clean the audit was.
@@ -480,9 +585,137 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     out.results = results;
     publishBoard(runId, opts.task, subs, false);
     for (const auto& sb : sandboxes) Sandbox::removeTree(sb);
+    // ---- Token efficiency -------------------------------------------------
+    // The point people care about: what did this run cost, and how much did
+    // routing save? "Cost" here is the free-local vs paid-cloud split, because
+    // that is the part that actually shows up on a bill — local Ollama tokens are
+    // free, cloud tokens are not.
+    if (ev.onLog) {
+        const QMap<QString, Usage::Tally> after = Usage::snapshot();
+        qint64 local = 0, cloud = 0;
+        QStringList lines;
+        for (auto it = after.constBegin(); it != after.constEnd(); ++it) {
+            const qint64 d = it.value().total() - usageBefore.value(it.key()).total();
+            if (d <= 0) continue;
+            (Models::isCloud(it.key()) ? cloud : local) += d;
+            lines << QStringLiteral("  %1  %2 tokens%3")
+                         .arg(it.key())
+                         .arg(d)
+                         .arg(Models::isCloud(it.key()) ? QStringLiteral(" (cloud)") : QString());
+        }
+        const qint64 total = local + cloud;
+        if (total > 0) {
+            ev.onLog(QStringLiteral("token report — %1 tokens this run:").arg(total));
+            for (const QString& l : lines) ev.onLog(l);
+            ev.onLog(QStringLiteral("  %1%% ran on free local models%2")
+                         .arg(local * 100 / total)
+                         .arg(opts.route ? QStringLiteral(" — routing kept the cheap work off the "
+                                                          "paid models")
+                                         : QString()));
+        }
+    }
+
     phase("done", QStringLiteral("%1 applied · %2 held")
                       .arg(out.applied.size())
                       .arg(out.held.size()));
+    return out;
+}
+
+// Security-scan mode: no code is written. Scanners read the tree in parallel and
+// report vulnerabilities; SecScan's regex signals seed them cheaply; the findings
+// are written to a report. This is the MDASH-shaped "hunt, don't build" flow, at
+// this project's scale.
+Crew::Result Crew::securityScan(const CrewOptions& opts, const CrewEvents& ev,
+                                const CancelToken& cancel) {
+    Result out;
+    const QString projectRoot = QDir::currentPath();
+    const QString runId = newRunId();
+    out.runId = runId;
+
+    const QString sessionBackend = Config::str("model.backend", "ollama");
+    const QString sessionModel = Config::str("ollama.defaultModel", "");
+    auto phase = [&](const QString& p, const QString& m) {
+        if (ev.onPhase) ev.onPhase(p, m);
+    };
+    const QString sb = opts.coderBackend.isEmpty() ? sessionBackend : opts.coderBackend;
+    const QString sm = [&] {
+        if (!opts.coderModel.isEmpty()) return opts.coderModel;
+        if (opts.route && sb == QLatin1String("ollama")) return Router::modelForTier("hard");
+        return sessionModel;
+    }();
+
+    // Cheap first pass: SecScan's regex signals across the tree. Fast, deterministic,
+    // and a useful seed even before any model reasons about the code.
+    phase("scan", "regex pre-scan");
+    QString seeded;
+    int seededCount = 0;
+    const QHash<QString, QString> files = Sandbox::listFiles(projectRoot);
+    QStringList sources = files.keys();
+    std::sort(sources.begin(), sources.end());
+    for (const QString& rel : sources) {
+        for (const Finding& f : SecScan::scanFile(files.value(rel))) {
+            seeded += QStringLiteral("- %1:%2 [%3] %4 (%5)\n")
+                          .arg(rel)
+                          .arg(f.line)
+                          .arg(f.severity, f.rule, f.redacted);
+            ++seededCount;
+        }
+    }
+    if (ev.onLog) ev.onLog(QStringLiteral("regex pre-scan: %1 signal(s)").arg(seededCount));
+
+    // Split the source list into scanner groups (bounded by the swarm cap), one
+    // read-only agent per group hunting for vulnerabilities.
+    const int cap = opts.swarmMax > 0 ? qMin(opts.swarmMax, 64) : 8;
+    const int groups = qBound(1, qMin(opts.maxCoders > 0 ? opts.maxCoders : 4, cap),
+                              qMax(1, sources.size()));
+    QVector<QStringList> buckets(groups);
+    for (int i = 0; i < sources.size(); ++i) buckets[i % groups].append(sources[i]);
+
+    phase("hunt", QStringLiteral("%1 scanners reading the tree").arg(groups));
+    const auto reports = parallelRun(
+        groups, [&](int) { return limiterKey(sb, sm); },
+        [&](int g) -> QJsonObject {
+            if (cancel.cancelled() || buckets[g].isEmpty()) return {};
+            Agent a(sb, sm);
+            Permission::setMode(PermMode::ReadOnly);
+            Permission::setInteractive(false);
+            Tools::setThreadRoot(projectRoot);
+            QString sys =
+                "You are a security scanner. Using READ-ONLY tools (view, grep, glob), inspect "
+                "the listed files for real vulnerabilities: injection, auth/authz gaps, unsafe "
+                "deserialization, path traversal, secrets, unsafe shell/exec, SSRF, memory safety. "
+                "Report ONLY concrete findings, each as `- <file>:<line> [severity] <issue> — <why>`. "
+                "If you find nothing real, say so. Do NOT invent issues.";
+            QString usr = "Focus" + (opts.focus.isEmpty() ? QString() : ": " + opts.focus) +
+                          "\n\nFiles to scan:\n" + buckets[g].join('\n');
+            if (!seeded.isEmpty())
+                usr += "\n\nRegex pre-scan signals (verify these, they are not proof):\n" +
+                       seeded.left(4000);
+            QVector<ChatMessage> msgs{{"system", sys, {}, {}, {}, {}, {}},
+                                      {"user", usr, {}, {}, {}, {}, {}}};
+            const QString finding =
+                a.loop(msgs, Config::integer("crew.researchIterations", 6), {}, cancel);
+            return QJsonObject{{"g", g + 1}, {"text", finding}};
+        });
+
+    // Assemble the report.
+    QString report = QStringLiteral("# Security scan — %1\n\n").arg(runId);
+    if (seededCount)
+        report += QStringLiteral("## Regex pre-scan (%1 signal(s))\n\n%2\n").arg(seededCount).arg(seeded);
+    report += QStringLiteral("## Scanner findings\n\n");
+    for (const auto& r : reports) {
+        const QString t = r.value("text").toString().trimmed();
+        if (!t.isEmpty())
+            report += QStringLiteral("### Scanner %1\n\n%2\n\n")
+                          .arg(r.value("g").toInt())
+                          .arg(t);
+    }
+    const QString path = runDir(runId) + "/security-report.md";
+    writeFile(path, report);
+    if (ev.onLog) ev.onLog(QStringLiteral("report written: %1").arg(path));
+    phase("done", QStringLiteral("scanned %1 files across %2 scanners")
+                      .arg(sources.size())
+                      .arg(groups));
     return out;
 }
 
