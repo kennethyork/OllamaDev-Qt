@@ -1,5 +1,7 @@
 #include "BrainPane.h"
 
+#include <QComboBox>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -11,6 +13,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "Backend.h"
+#include "Config.h"
 #include "Crew.h"
 #include "Models.h"
 #include "Router.h"
@@ -154,7 +158,32 @@ public:
         map_ = new BrainMap(this);
         root->addWidget(map_, 1);
 
-        // Router tiers — the model each difficulty maps to right now.
+        // Router tiers — pick the model each difficulty routes to. Writing to the
+        // shared ade-prefs.json means the CLI's brain uses the same choices.
+        auto* tierBox = new QGroupBox(tr("Brain — model per difficulty tier"), this);
+        auto* form = new QFormLayout(tierBox);
+        const QStringList models = installedModels();
+        for (const QString& tier : {QStringLiteral("simple"), QStringLiteral("moderate"),
+                                    QStringLiteral("hard")}) {
+            auto* combo = new QComboBox(tierBox);
+            combo->addItem(tr("(auto)"), QString());   // empty → auto-derived default
+            for (const QString& m : models) combo->addItem(m, m);
+            const QString saved = Config::str(QStringLiteral("router.%1").arg(tier));
+            combo->setCurrentIndex(qMax(0, combo->findData(saved)));
+            connect(combo, &QComboBox::currentIndexChanged, this, [this, combo, tier](int) {
+                Config::setPref(QStringLiteral("router.%1").arg(tier),
+                                combo->currentData().toString());
+                refresh();
+            });
+            tierCombos_.insert(tier, combo);
+            const QString label = tier == QLatin1String("simple")   ? tr("Simple (trivia)")
+                                  : tier == QLatin1String("hard")   ? tr("Hard (design/debug)")
+                                                                    : tr("Moderate (general)");
+            form->addRow(label, combo);
+        }
+        root->addWidget(tierBox);
+
+        // The model each tier resolves to right now (incl. auto-derived defaults).
         tiers_ = new QLabel(this);
         tiers_->setTextFormat(Qt::RichText);
         tiers_->setWordWrap(true);
@@ -184,6 +213,11 @@ public:
     }
 
 private:
+    static QStringList installedModels() {
+        auto b = Backends::get(QStringLiteral("ollama"));
+        return b ? b->models() : QStringList{};
+    }
+
     void classify(const QString& s) {
         if (s.trimmed().isEmpty()) {
             verdict_->clear();
@@ -241,6 +275,7 @@ private:
 
     PaneHost& host_;
     BrainMap* map_ = nullptr;
+    QMap<QString, QComboBox*> tierCombos_;
     QLabel* tiers_ = nullptr;
     QLineEdit* probe_ = nullptr;
     QLabel* verdict_ = nullptr;
