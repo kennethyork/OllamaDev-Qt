@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "Config.h"
+#include "ContextTuner.h"
 #include "Json.h"
 #include "Models.h"
 #include "Usage.h"
@@ -313,7 +314,12 @@ QJsonObject OllamaBackend::chatOptions(const QString& model) {
         ctx = std::min(want, std::max(512, cap));
     }
 
-    const bool lowRes = Config::boolean("ollama.lowResource", false);
+    // The DEFAULT now comes from the hardware. An explicit ollama.lowResource in
+    // config (or OLLAMADEV_POWER in the environment) still wins — but shipping
+    // `true` unconditionally throttled a 24GB GPU exactly as hard as a laptop with
+    // none, and never said so.
+    const bool lowRes =
+        Config::boolean("ollama.lowResource", ContextTuner::lowResourceMachine());
     if (!cloud && lowRes) {
         ctx = std::min(ctx, std::max(2048, Config::integer("ollama.lowResourceCtx", 8192)));
     }

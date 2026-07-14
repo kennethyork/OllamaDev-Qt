@@ -61,9 +61,18 @@ QJsonObject defaults() {
         {"autoContext", true},
         {"temperature", 0.3},
         {"stream", true},
-        // Light mode is the default: small KV cache, model unloaded when idle,
-        // coders serialised. It only ever throttles LOCAL models.
-        {"lowResource", true},
+        // NO `lowResource` default here, deliberately.
+        //
+        // It used to be a hardcoded `true`: light mode — small KV cache, model
+        // unloaded when idle, coders serialised. Safe, and completely wrong for
+        // anyone with a real GPU: a 24GB RTX 3090 got capped at an 8192-token
+        // context exactly as hard as a laptop with no GPU at all, even when the
+        // user's own contextWindow asked for 16384 and the model could do 262144.
+        //
+        // Leaving the key ABSENT is what lets OllamaBackend fall back to
+        // ContextTuner::lowResourceMachine(), which measures the hardware. Put a
+        // default back here and you silently kill that, because Config::boolean()
+        // finds the default and never reaches the fallback.
         {"keepAlive", QStringLiteral("60s")},
     };
 

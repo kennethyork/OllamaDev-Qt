@@ -106,6 +106,28 @@ QString gb(qint64 b) {
 
 int ContextTuner::suggest() { return probe().suggested; }
 
+bool ContextTuner::lowResourceMachine() {
+    // nvidia-smi is a subprocess and chatOptions() runs on every request, so this is
+    // answered once per process.
+    static const bool low = [] {
+        const qint64 gib = 1024LL * 1024 * 1024;
+        const qint64 vram = vramBytes();
+
+        // 8GB+ of VRAM comfortably holds a 9-13B model with a large KV cache. This
+        // is not a low-resource machine, and pretending it is costs the user most of
+        // their context window for no reason at all.
+        if (vram >= 8 * gib) return false;
+
+        // No usable GPU: it will run on the CPU, where RAM is the constraint. 32GB is
+        // plenty to be generous with; below that, be careful.
+        if (vram == 0) return ramBytes() < 32 * gib;
+
+        // A small GPU (<8GB) genuinely is tight once the weights are resident.
+        return true;
+    }();
+    return low;
+}
+
 QString ContextTuner::report() {
     const Probe p = probe();
     const QLocale loc = QLocale::system();
