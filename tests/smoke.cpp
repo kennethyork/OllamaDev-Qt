@@ -1281,6 +1281,39 @@ static void testWorktreeSandbox() {
           "…and no worktree, because there is no repo to make one from");
 }
 
+// git.model: an explicit setting always wins; with none set, a commit message is a
+// small local job, so the default prefers gpt-oss:20b over the (often big, cloud)
+// session model — but only falls to it, never breaks a fresh install that never
+// pulled it.
+static void testGitModel() {
+    const QByteArray realHome = qgetenv("HOME");
+    QTemporaryDir home;
+    qputenv("HOME", home.path().toUtf8());
+    Config::load();
+
+    // Nothing set, and gpt-oss:20b is not installed in this empty home's view of
+    // things → fall back to the session model, never a dangling default.
+    check(GitFlow::modelFor(QStringLiteral("qwen3.5:9b")) != QString(),
+          "with no git.model set, modelFor returns *something* usable");
+
+    // An explicit setting is returned verbatim and never second-guessed — this is
+    // the user's own choice (e.g. a big cloud model), and the default must not
+    // override it.
+    {
+        QFile f(home.path() + QStringLiteral("/.ollamadev/ade-prefs.json"));
+        QDir().mkpath(QFileInfo(f.fileName()).absolutePath());
+        f.open(QIODevice::WriteOnly);
+        f.write(R"({"git.model":"gpt-oss:120b-cloud"})");
+        f.close();
+    }
+    Config::load();
+    check(GitFlow::modelFor(QStringLiteral("qwen3.5:9b")) == QStringLiteral("gpt-oss:120b-cloud"),
+          "an explicit git.model ALWAYS wins over the default");
+
+    qputenv("HOME", realHome);
+    Config::load();
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -1307,6 +1340,7 @@ int main(int argc, char** argv) {
     s << "git-graph\n";  s.flush(); testGitGraph();
     s << "rebase\n";     s.flush(); testRebase();
     s << "worktree\n";   s.flush(); testWorktreeSandbox();
+    s << "git-model\n";  s.flush(); testGitModel();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

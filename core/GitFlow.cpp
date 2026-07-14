@@ -155,8 +155,23 @@ QString GitFlow::stagedDiff() {
 }
 
 QString GitFlow::modelFor(const QString& fallbackModel) {
+    // An explicit git.model always wins. (This is the user's own setting — e.g.
+    // gpt-oss:120b-cloud — and it is never second-guessed.)
     const QString m = Config::str(QStringLiteral("git.model")).trimmed();
-    return m.isEmpty() ? fallbackModel : m;
+    if (!m.isEmpty()) return m;
+
+    // No preference set: a commit message, a PR body, a PR review are small, boring,
+    // high-frequency jobs. gpt-oss:20b does them well and — unlike the session model,
+    // which is often a big cloud tag — it runs LOCALLY, so the tail (a "fix: typo"
+    // message) does not wag the dog. Prefer it when the user actually has it; fall
+    // back to the session model otherwise, so a fresh install is never broken by a
+    // default pointing at a model nobody pulled.
+    if (auto ollama = Backends::get(QStringLiteral("ollama"))) {
+        const QStringList have = ollama->models();
+        for (const QString& tag : {QStringLiteral("gpt-oss:20b"), QStringLiteral("gpt-oss:20b-cloud")})
+            if (have.contains(tag)) return tag;
+    }
+    return fallbackModel;
 }
 
 QVector<Finding> GitFlow::highFindings(const QString& diff) {
