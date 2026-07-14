@@ -9,6 +9,7 @@
 #include "AgentTeamPane.h"
 #include "BrainPane.h"
 #include "BrowserPane.h"
+#include "ChatPane.h"
 #include "CodeSearchPane.h"
 #include "CoderPane.h"
 #include "GraphPane.h"
@@ -29,6 +30,7 @@ void registerExtraPanes() {
     r.add(makeVoicePaneSpec());
     r.add(makeTopologyPaneSpec());
     r.add(makeCoderPaneSpec());
+    r.add(makeChatPaneSpec());
     r.add(makeAgentTeamPaneSpec());
     r.add(makeBrainPaneSpec());
 }

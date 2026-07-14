@@ -16,6 +16,7 @@ qt_add_executable(ollamadev-ade
     GraphPane.cpp GraphPane.h
     TopologyPane.cpp TopologyPane.h
     CoderPane.cpp CoderPane.h
+    ChatPane.cpp ChatPane.h
     CodeSearchPane.cpp CodeSearchPane.h
     VoicePane.cpp VoicePane.h
     AgentTeamPane.cpp AgentTeamPane.h
