@@ -1,5 +1,7 @@
 #include "Skills.h"
 
+#include "Plugins.h"
+
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -234,6 +236,9 @@ QString Skills::catalogFor(const QString& root) {
 QVector<Skill> Skills::allIn(const QString& root) {
     QStringList bases{root + QStringLiteral("/.ollamadev/skills"),
                       homeRoot() + QStringLiteral("/.ollamadev/skills")};
+    // Enabled plugins go LAST: first writer wins below, so a plugin can add a
+    // skill but can never shadow one you wrote yourself.
+    bases += Plugins::skillDirs();
     bases.removeDuplicates();
 
     QVector<Skill> out;

@@ -24,6 +24,7 @@
 #include <string>
 
 #include "Config.h"
+#include "Plugins.h"
 #include "Json.h"
 #include "Version.h"
 
@@ -523,6 +524,12 @@ QVector<McpServerCfg> Mcp::servers() {
         if (!e.contains(QStringLiteral("command")) && !e.contains(QStringLiteral("url"))) continue;
         obj.insert(it.key(), e);
     }
+
+    // Servers contributed by an enabled plugin. A configured server of the same
+    // name wins — your own config is never overridden by something you installed.
+    const QJsonObject fromPlugins = Plugins::mcpServers();
+    for (auto it = fromPlugins.constBegin(); it != fromPlugins.constEnd(); ++it)
+        if (!obj.contains(it.key()) && it.value().isObject()) obj.insert(it.key(), it.value());
 
     QVector<McpServerCfg> out;
     for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {

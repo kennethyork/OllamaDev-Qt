@@ -39,6 +39,7 @@
 #include "Usage.h"
 #include "Verify.h"
 #include "Vision.h"
+#include "Plugins.h"
 #include "Workspaces.h"
 #include "Version.h"
 #include "Watch.h"
@@ -378,6 +379,135 @@ int cmdCrew(const QStringList& args) {
     }
 
     return runCrewAndReport(o);
+}
+
+// --------------------------------------------------------------------- plugins
+
+bool askYesNo(const QString& prompt);  // defined below, next to the other prompts
+
+int cmdPlugin(const QStringList& args) {
+    const QString sub = args.value(0);
+
+    if (sub.isEmpty() || sub == "list" || sub == "ls") {
+        const auto list = Plugins::all();
+        if (list.isEmpty()) {
+            out() << "no plugins installed\n"
+                     "  ollamadev plugin install <dir|https git url>\n\n"
+                     "A plugin is a folder with a plugin.json. It can contribute skills,\n"
+                     "slash-commands, hooks and MCP servers — the extension points that\n"
+                     "already exist. It cannot run code of its own.\n";
+            out().flush();
+            return 0;
+        }
+        for (const Plugin& p : list) {
+            out() << (p.enabled ? " ✓ " : " · ") << p.name.leftJustified(18) << "  "
+                  << p.version.leftJustified(8) << "  " << p.description << "\n"
+                  << "      " << p.capabilities() << "\n";
+        }
+        out() << "\n ✓ = enabled.  Enable one:  ollamadev plugin enable <name>\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "install") {
+        const QString src = positionals(args).value(1);
+        QString e, name;
+        if (!Plugins::install(src, &e, &name)) {
+            err() << "install failed: " << e << "\n";
+            err().flush();
+            return 1;
+        }
+        Plugin p;
+        Plugins::get(name, &p);
+        out() << "✓ installed " << name << "  [disabled]\n"
+              << "  it provides: " << p.capabilities() << "\n"
+              << "  nothing of it is live until:  ollamadev plugin enable " << name << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "enable") {
+        const QString name = positionals(args).value(1);
+        Plugin p;
+        if (!Plugins::get(name, &p)) {
+            err() << "no plugin '" << name << "'\n";
+            err().flush();
+            return 1;
+        }
+        // THE CONSENT MOMENT. Enabling is what turns a plugin's `hooks` into shell
+        // commands that run on this machine, so print them IN FULL and ask. Nobody
+        // can consent to something they were not shown.
+        if (!p.hooks.isEmpty()) {
+            out() << "\n" << p.name << " wants to run these commands on your machine:\n";
+            for (const PluginHook& h : p.hooks)
+                out() << "    on " << h.event
+                      << (h.matcher.isEmpty() ? QString() : QStringLiteral(" [%1]").arg(h.matcher))
+                      << ":  " << h.command << "\n";
+            out() << "\n";
+            out().flush();
+            if (!hasFlag(args, "--yes") && !askYesNo(QStringLiteral("enable it?"))) {
+                out() << "left disabled\n";
+                out().flush();
+                return 1;
+            }
+        }
+        QString e;
+        if (!Plugins::setEnabled(p.name, true, &e)) {
+            err() << e << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ enabled " << p.name << " — " << p.capabilities() << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "disable") {
+        QString e;
+        if (!Plugins::setEnabled(positionals(args).value(1), false, &e)) {
+            err() << e << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ disabled " << positionals(args).value(1) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "remove" || sub == "rm" || sub == "uninstall") {
+        QString e;
+        if (!Plugins::remove(positionals(args).value(1), &e)) {
+            err() << e << "\n";
+            err().flush();
+            return 1;
+        }
+        out() << "✓ removed " << positionals(args).value(1) << "\n";
+        out().flush();
+        return 0;
+    }
+
+    if (sub == "show") {
+        Plugin p;
+        if (!Plugins::get(positionals(args).value(1), &p)) {
+            err() << "no plugin '" << positionals(args).value(1) << "'\n";
+            err().flush();
+            return 1;
+        }
+        out() << p.name << " " << p.version << (p.enabled ? "  [enabled]" : "  [disabled]") << "\n"
+              << p.description << "\n"
+              << (p.homepage.isEmpty() ? QString() : p.homepage + QStringLiteral("\n"))
+              << "  dir:      " << p.dir << "\n"
+              << "  provides: " << p.capabilities() << "\n";
+        for (const PluginHook& h : p.hooks)
+            out() << "  hook on " << h.event << ":  " << h.command << "\n";
+        out().flush();
+        return 0;
+    }
+
+    err() << "usage: ollamadev plugin [list | install <dir|https url> | enable <name> | disable "
+             "<name> | remove <name> | show <name>]\n";
+    err().flush();
+    return 1;
 }
 
 // ------------------------------------------------------------------ workspaces
@@ -2583,6 +2713,7 @@ int main(int argc, char** argv) {
     }
     if (cmd == "board") return cmdBoard(rest);
     if (cmd == "ws" || cmd == "workspace") return cmdWorkspace(rest);
+    if (cmd == "plugin" || cmd == "plugins") return cmdPlugin(rest);
     if (cmd == "scan") return cmdScan(rest);
     if (cmd == "voice") return cmdVoice(rest);
     if (cmd == "transcribe") return cmdTranscribe(rest);

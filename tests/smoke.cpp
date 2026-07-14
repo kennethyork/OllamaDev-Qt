@@ -10,9 +10,11 @@
 
 #include "Backend.h"
 #include "Config.h"
+#include "Hooks.h"
 #include "Json.h"
 #include "Models.h"
 #include "Parallel.h"
+#include "Plugins.h"
 #include "Sandbox.h"
 #include "SecScan.h"
 #include "Tools.h"
@@ -595,6 +597,98 @@ static void testWorkspaces() {
     qputenv("HOME", realHome);
 }
 
+// Plugins. A plugin contributes skills, commands, hooks and MCP servers — the
+// extension points that already exist. It cannot run code of its own.
+//
+// The bug this test exists for: hooks contributed by a plugin must NEVER reach
+// Hooks::listFor(), because that is the EDITING view — `hooks add` reads it,
+// modifies it, and writes the result back to the user's config. A plugin hook
+// leaking in there gets baked permanently into their config file, where it then
+// survives the plugin being disabled or even uninstalled. That happened.
+static void testPlugins() {
+    const QByteArray realHome = qgetenv("HOME");
+    QTemporaryDir home, src, proj;
+    if (!home.isValid() || !src.isValid()) {
+        check(false, "temp dirs for the plugin test");
+        return;
+    }
+    qputenv("HOME", home.path().toUtf8());
+
+    // A plugin on disk: a manifest, a skill, and a hook that leaves a trace.
+    const QString flag = home.path() + QStringLiteral("/hook-fired");
+    QDir(src.path()).mkpath(QStringLiteral("skills/tidy"));
+    QDir(src.path()).mkpath(QStringLiteral("commands"));
+    const QString manifest =
+        QStringLiteral(
+            R"({"name":"tidy","version":"1.0","description":"d",
+                "hooks":[{"event":"PostToolUse","matcher":"write","command":"touch '%1'"}],
+                "mcp":{"tidy-ls":{"command":"python"}}})")
+            .arg(flag);
+    QFile mf(src.path() + QStringLiteral("/plugin.json"));
+    mf.open(QIODevice::WriteOnly);
+    mf.write(manifest.toUtf8());
+    mf.close();
+    QFile sk(src.path() + QStringLiteral("/skills/tidy/SKILL.md"));
+    sk.open(QIODevice::WriteOnly);
+    sk.write("---\nname: tidy\ndescription: how we format\n---\nbody\n");
+    sk.close();
+
+    QString err, name;
+    check(Plugins::install(src.path(), &err, &name) && name == QStringLiteral("tidy"),
+          "a plugin installs from a local directory");
+
+    Plugin p;
+    check(Plugins::get(QStringLiteral("tidy"), &p) && !p.enabled,
+          "an installed plugin is DISABLED until the user says otherwise");
+    check(p.hooks.size() == 1 && p.hasSkills && !p.mcp.isEmpty(),
+          "the manifest's contributions are read");
+    check(p.capabilities().contains(QStringLiteral("HOOK")),
+          "capabilities() names the hooks loudly — that is what the consent prompt shows");
+
+    // Disabled: contributes nothing.
+    check(Plugins::hooksFor(QStringLiteral("PostToolUse")).isEmpty(),
+          "a DISABLED plugin contributes no hooks");
+    check(Plugins::skillDirs().isEmpty(), "a disabled plugin contributes no skills");
+    check(Plugins::mcpServers().isEmpty(), "a disabled plugin contributes no MCP servers");
+
+    check(Plugins::setEnabled(QStringLiteral("tidy"), true, &err), "the user enables it");
+    check(Plugins::hooksFor(QStringLiteral("PostToolUse")).size() == 1,
+          "an ENABLED plugin's hook is live");
+    check(Plugins::skillDirs().size() == 1, "…and its skills are discoverable");
+    check(Plugins::mcpServers().size() == 1, "…and its MCP servers are connected");
+
+    // THE REGRESSION. listFor() is the editing view; a plugin hook in there gets
+    // written into the user's own config by the next `hooks add`.
+    check(Hooks::listFor(QStringLiteral("PostToolUse")).isEmpty(),
+          "a plugin hook NEVER appears in the config editing view (it would be persisted)");
+
+    // …but it really does fire, through the execution path.
+    Tools::registerAll();
+    Permission::setMode(PermMode::Auto);
+    Permission::setInteractive(false);
+    Tools::setThreadRoot(proj.path());
+    Tools::run(QStringLiteral("write"), QJsonObject{{"file_path", QStringLiteral("x.txt")},
+                                                    {"content", QStringLiteral("hi")}});
+    check(QFileInfo(flag).exists(), "an enabled plugin's hook actually FIRES on a tool call");
+
+    QFile::remove(flag);
+    check(Plugins::setEnabled(QStringLiteral("tidy"), false, &err), "the user disables it");
+    Tools::run(QStringLiteral("write"), QJsonObject{{"file_path", QStringLiteral("y.txt")},
+                                                    {"content", QStringLiteral("hi")}});
+    check(!QFileInfo(flag).exists(), "a DISABLED plugin's hook does NOT fire");
+
+    check(Plugins::remove(QStringLiteral("tidy"), &err) && Plugins::all().isEmpty(),
+          "a plugin uninstalls cleanly");
+
+    // The PHP `plugin remove` passed its argument straight to unlink(), so
+    // "../../something" was live. A name is a directory name, nothing else.
+    check(!Plugins::remove(QStringLiteral("../../etc/passwd"), &err),
+          "a plugin name cannot traverse out of the plugins directory");
+
+    Tools::setThreadRoot(QString());
+    qputenv("HOME", realHome);
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -613,6 +707,7 @@ int main(int argc, char** argv) {
     s << "vision\n";      s.flush(); testVision();
     s << "crew-steer\n";  s.flush(); testCrewSteer();
     s << "workspaces\n"; s.flush(); testWorkspaces();
+    s << "plugins\n";    s.flush(); testPlugins();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

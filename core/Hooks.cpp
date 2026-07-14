@@ -1,5 +1,7 @@
 #include "Hooks.h"
 
+#include "Plugins.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -106,7 +108,28 @@ bool matches(const QString& matcher, const QString& subject) {
     return rx.match(subject).hasMatch();
 }
 
-// Commands configured for an event, after matcher filtering.
+// Hooks from ENABLED plugins, for the EXECUTION path.
+//
+// Kept as its own function and appended by EVERY return path of commandsFor()
+// below, because the obvious way to write this — one loop at the bottom — is
+// wrong: commandsFor() returns early when the user has no config hooks for the
+// event, so a plugin's hook would then fire ONLY for users who happened to
+// already have a config hook of their own. Which is exactly the bug that was
+// here, and exactly the kind a happy-path test never finds.
+QStringList pluginCommandsFor(const QString& event, const QString& subject) {
+    QStringList out;
+    for (const PluginHook& h : Plugins::hooksFor(event)) {
+        const QString cmd = h.command.trimmed();
+        if (cmd.isEmpty() || !matches(h.matcher.trimmed(), subject)) continue;
+        out << cmd;
+    }
+    return out;
+}
+
+// Commands configured for an event, after matcher filtering. Config hooks first,
+// then the enabled plugins' — they rank with the HOME config, not the project
+// file, because the user installed the plugin and then explicitly said yes to it
+// having been shown the exact commands. A repo you merely cloned never gets that.
 QStringList commandsFor(const QString& event, const QString& subject) {
     const QJsonValue cfg = json::at(trustedConfig(), QStringLiteral("hooks.") + event);
     QStringList out;
@@ -115,9 +138,9 @@ QStringList commandsFor(const QString& event, const QString& subject) {
     if (cfg.isString()) {
         const QString s = cfg.toString().trimmed();
         if (!s.isEmpty()) out << s;
-        return out;
+        return out + pluginCommandsFor(event, subject);
     }
-    if (!cfg.isArray()) return out;
+    if (!cfg.isArray()) return out + pluginCommandsFor(event, subject);
 
     for (const QJsonValue& h : cfg.toArray()) {
         if (h.isString()) {
@@ -135,7 +158,7 @@ QStringList commandsFor(const QString& event, const QString& subject) {
         if (!matches(matcher, subject)) continue;
         out << cmd;
     }
-    return out;
+    return out + pluginCommandsFor(event, subject);
 }
 
 int timeoutMs() {
@@ -223,6 +246,17 @@ QString Hooks::normalizeEvent(const QString& e) {
     return {};
 }
 
+// The hooks DECLARED IN CONFIG. Deliberately does NOT include plugin hooks.
+//
+// This is the EDITING view: `hooks add` and `hooks remove` read it, modify it, and
+// write the result back to config. Mixing plugin-contributed hooks in here means
+// the next `hooks add` reads a plugin's hook as if it were the user's own and
+// bakes it permanently into their config file — where it then survives the plugin
+// being disabled or removed, because it is no longer the plugin's hook at all.
+// That is not a hypothetical: it happened, and it is why this comment exists.
+//
+// Plugin hooks are live in commandsFor() (the execution path) and shown as a
+// separate, read-only section by renderConfigured().
 QVector<Hooks::Hook> Hooks::listFor(const QString& event) {
     const QString ev = normalizeEvent(event);
     QVector<Hook> out;
@@ -380,6 +414,22 @@ QString Hooks::renderConfigured() {
         }
     }
     if (!any) out += QStringLiteral("  (none configured)\n");
+
+    // Plugin hooks are LIVE but are not yours to edit here — they belong to the
+    // plugin, and they go away when you disable it. Shown separately and without
+    // an index, so nobody tries to `hooks remove` one and finds it still firing.
+    QString fromPlugins;
+    for (const QString& ev : knownEvents()) {
+        for (const PluginHook& h : Plugins::hooksFor(ev)) {
+            fromPlugins += QStringLiteral("    %1: %2").arg(ev, h.command);
+            if (!h.matcher.isEmpty()) fromPlugins += QStringLiteral(" [match: %1]").arg(h.matcher);
+            fromPlugins += QLatin1Char('\n');
+        }
+    }
+    if (!fromPlugins.isEmpty())
+        out += QStringLiteral("\n  From enabled plugins (disable the plugin to stop these):\n") +
+               fromPlugins;
+
     out += QStringLiteral(
         "  add: hooks add <event> <command> [--match <regex>]  ·  remove: hooks remove <event> "
         "<index>\n");
