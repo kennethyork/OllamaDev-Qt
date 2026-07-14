@@ -23,6 +23,11 @@ void openSkills(PaneHost& host);      // reusable skills — list / edit / save 
 void openHooks(PaneHost& host);       // lifecycle shell hooks — list / add / remove
 void openCrewLaunch(PaneHost& host);  // crew setup form → runInTerminal("ollamadev crew …")
 void openReview(PaneHost& host);      // the working-tree diff, +/- coloured
+
+// Bookmarked project folders — the same ~/.ollamadev/workspaces.json the CLI's
+// `ollamadev ws` reads and writes, so a folder bookmarked in either app shows up
+// in the other. `onOpen` is called with a path when the user picks one.
+void openWorkspaces(PaneHost& host, const std::function<void(const QString&)>& onOpen);
 }  // namespace ManageDialogs
 
 }  // namespace odv

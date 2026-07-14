@@ -20,6 +20,8 @@ class QLabel;
 class QNetworkAccessManager;
 class QTimer;
 
+class QToolButton;
+
 namespace odv {
 
 class BoardPane;
@@ -60,6 +62,9 @@ private slots:
 
 private:
     void buildTopBar();
+    void buildProjectMenu(class QMenu* menu);
+    void chooseProject();               // Ctrl+O — pick a folder
+    void openProject(const QString& path);  // switch project: re-root EVERYTHING
     void buildAddMenu(class QMenu* menu);
 
     Pane* addTerminal(const QString& id, const QString& cwd, const QString& replay,
@@ -90,6 +95,7 @@ private:
     QComboBox* models_ = nullptr;
     QComboBox* perms_ = nullptr;
     QComboBox* themes_ = nullptr;
+    QToolButton* projectBtn_ = nullptr;
 
     QNetworkAccessManager* net_ = nullptr;
     QTimer* ping_ = nullptr;

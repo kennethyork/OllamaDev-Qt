@@ -14,6 +14,11 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QHeaderView>
+#include <QInputDialog>
+#include <QTreeWidget>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -30,6 +35,7 @@
 #include "Hooks.h"
 #include "Skills.h"
 #include "Theme.h"
+#include "Workspaces.h"
 
 namespace odv {
 namespace ManageDialogs {
@@ -479,5 +485,113 @@ void openReview(PaneHost& host) {
     dlg->show();
 }
 
+
+// ---- workspaces -------------------------------------------------------------
+
+void openWorkspaces(PaneHost& host, const std::function<void(const QString&)>& onOpen) {
+    QDialog dlg(host.window());
+    dlg.setWindowTitle(QObject::tr("Workspaces"));
+    dlg.resize(660, 420);
+    auto* v = new QVBoxLayout(&dlg);
+
+    auto* hint = new QLabel(QObject::tr(
+        "Bookmarked project folders. The same list `ollamadev ws` uses — bookmark a folder here "
+        "and the CLI sees it too."), &dlg);
+    hint->setWordWrap(true);
+    hint->setStyleSheet(QStringLiteral("color:%1").arg(Theme::currentColors().dim.name()));
+    v->addWidget(hint);
+
+    auto* list = new QTreeWidget(&dlg);
+    list->setHeaderLabels({QObject::tr("Name"), QObject::tr("Folder")});
+    list->setRootIsDecorated(false);
+    list->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    v->addWidget(list, 1);
+
+    const QString active = host.project();
+    const auto reload = [list, active] {
+        list->clear();
+        for (const Workspace& w : Workspaces::all()) {
+            auto* it = new QTreeWidgetItem(list, {w.name, w.path});
+            it->setData(0, Qt::UserRole, w.path);
+            if (w.path != active) continue;
+            QFont f = it->font(0);
+            f.setBold(true);
+            it->setFont(0, f);
+            it->setForeground(0, Theme::currentColors().accent);
+            it->setText(0, w.name + QObject::tr("   (open)"));
+        }
+    };
+    reload();
+
+    auto* row = new QHBoxLayout;
+    auto* add = new QPushButton(QObject::tr("Bookmark a folder…"), &dlg);
+    auto* rename = new QPushButton(QObject::tr("Rename"), &dlg);
+    auto* remove = new QPushButton(QObject::tr("Remove"), &dlg);
+    auto* open = new QPushButton(QObject::tr("Open"), &dlg);
+    open->setProperty("cta", true);
+    row->addWidget(add);
+    row->addWidget(rename);
+    row->addWidget(remove);
+    row->addStretch(1);
+    row->addWidget(open);
+    v->addLayout(row);
+
+    const auto selected = [list]() -> QString {
+        auto* it = list->currentItem();
+        return it ? it->data(0, Qt::UserRole).toString() : QString();
+    };
+
+    QObject::connect(add, &QPushButton::clicked, &dlg, [&] {
+        const QString dir = QFileDialog::getExistingDirectory(
+            &dlg, QObject::tr("Bookmark a project folder"), host.project(),
+            QFileDialog::ShowDirsOnly);
+        if (dir.isEmpty()) return;
+        Workspaces::add(dir);
+        reload();
+    });
+
+    QObject::connect(rename, &QPushButton::clicked, &dlg, [&] {
+        const QString path = selected();
+        if (path.isEmpty()) return;
+        Workspace w;
+        Workspaces::find(path, &w);
+        bool ok = false;
+        const QString name = QInputDialog::getText(&dlg, QObject::tr("Rename workspace"),
+                                                   QObject::tr("Name:"), QLineEdit::Normal, w.name,
+                                                   &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        Workspaces::add(path, name.trimmed());  // upsert by path: renames in place
+        reload();
+    });
+
+    QObject::connect(remove, &QPushButton::clicked, &dlg, [&] {
+        const QString path = selected();
+        if (path.isEmpty()) return;
+        // Removing a BOOKMARK, not the folder. Say so — "Remove" next to a file path
+        // is exactly the sort of button people are right to hesitate over.
+        if (QMessageBox::question(
+                &dlg, QObject::tr("Remove workspace"),
+                QObject::tr("Forget the bookmark for:\n\n%1\n\nThe folder itself is NOT deleted.")
+                    .arg(path),
+                QMessageBox::Cancel | QMessageBox::Ok, QMessageBox::Cancel) != QMessageBox::Ok)
+            return;
+        Workspaces::remove(path);
+        reload();
+    });
+
+    const auto go = [&] {
+        const QString path = selected();
+        if (path.isEmpty() || path == host.project()) return;
+        dlg.accept();
+        onOpen(path);
+    };
+    QObject::connect(open, &QPushButton::clicked, &dlg, go);
+    QObject::connect(list, &QTreeWidget::itemDoubleClicked, &dlg, [&](QTreeWidgetItem*, int) { go(); });
+
+    dlg.exec();
+}
+
 }  // namespace ManageDialogs
+
+
 }  // namespace odv

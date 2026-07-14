@@ -21,6 +21,8 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <QShortcut>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -52,6 +54,7 @@
 #include "Pane.h"
 #include "TerminalWidget.h"
 #include "Theme.h"
+#include "Workspaces.h"
 #include "ThemeDialog.h"
 #include "Tools.h"
 
@@ -207,6 +210,9 @@ void MainWindow::buildTopBar() {
             [this] { ManageDialogs::openCrewLaunch(*this); });
     connect(mmenu->addAction(tr("Review changes…")), &QAction::triggered, this,
             [this] { ManageDialogs::openReview(*this); });
+    connect(mmenu->addAction(tr("Workspaces…")), &QAction::triggered, this, [this] {
+        ManageDialogs::openWorkspaces(*this, [this](const QString& p) { openProject(p); });
+    });
     mmenu->addSeparator();
     connect(mmenu->addAction(tr("Crew roles…")), &QAction::triggered, this,
             [this] { ManageDialogs::openRoles(*this); });
@@ -237,10 +243,25 @@ void MainWindow::buildTopBar() {
 
     row->addStretch(1);
 
-    auto* cwd = new QLabel(project_, bar);
-    cwd->setStyleSheet(
-        QStringLiteral("color:%1;").arg(Theme::currentColors().faint.name()));
-    row->addWidget(cwd);
+    // The project switcher. This used to be a dead QLabel showing the directory the
+    // app happened to be launched from — and there was NO way to open another one.
+    // You had to quit, cd, and relaunch.
+    projectBtn_ = new QToolButton(bar);
+    projectBtn_->setText(QFileInfo(project_).fileName());
+    projectBtn_->setToolTip(project_);
+    projectBtn_->setPopupMode(QToolButton::InstantPopup);
+    projectBtn_->setStyleSheet(
+        QStringLiteral("QToolButton{color:%1;border:1px solid %2;border-radius:6px;padding:4px 9px}"
+                       "QToolButton:hover{color:%3;border-color:%3}")
+            .arg(Theme::currentColors().dim.name(), Theme::currentColors().border.name(),
+                 Theme::currentColors().accent.name()));
+    auto* pmenu = new QMenu(projectBtn_);
+    connect(pmenu, &QMenu::aboutToShow, this, [this, pmenu] { buildProjectMenu(pmenu); });
+    projectBtn_->setMenu(pmenu);
+    row->addWidget(projectBtn_);
+
+    auto* open = new QShortcut(QKeySequence::Open, this);  // Ctrl+O
+    connect(open, &QShortcut::activated, this, [this] { chooseProject(); });
 
     themes_ = new QComboBox(bar);
     for (const QString& id : Theme::names()) themes_->addItem(Theme::label(id), id);
@@ -591,6 +612,75 @@ QString MainWindow::workspaceId(const QString& absPath) {
     const QByteArray h =
         QCryptographicHash::hash(absPath.toUtf8(), QCryptographicHash::Sha1).toHex();
     return QStringLiteral("ws_") + QString::fromLatin1(h.left(10));
+}
+
+// ---- project switching ------------------------------------------------------
+
+void MainWindow::buildProjectMenu(QMenu* menu) {
+    menu->clear();
+    connect(menu->addAction(tr("Open folder…\tCtrl+O")), &QAction::triggered, this,
+            [this] { chooseProject(); });
+
+    // The workspaces the CLI already knows about (`ollamadev ws add`). Both apps read
+    // and write the same ~/.ollamadev/workspaces.json, so a folder bookmarked in one
+    // shows up in the other.
+    const QVector<Workspace> saved = Workspaces::all();
+    if (saved.isEmpty()) return;
+
+    menu->addSeparator();
+    for (const Workspace& w : saved) {
+        if (w.path == project_) continue;  // you are already here
+        QAction* a = menu->addAction(QStringLiteral("%1   %2").arg(w.name, w.path));
+        const QString path = w.path;
+        connect(a, &QAction::triggered, this, [this, path] { openProject(path); });
+    }
+}
+
+void MainWindow::chooseProject() {
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Open a project folder"), project_, QFileDialog::ShowDirsOnly);
+    if (!dir.isEmpty()) openProject(dir);
+}
+
+void MainWindow::openProject(const QString& path) {
+    const QString abs = QDir(path).absolutePath();
+    if (abs == project_) return;
+    if (!QFileInfo(abs).isDir()) {
+        status(tr("no such folder: %1").arg(abs));
+        return;
+    }
+
+    // Save the layout of the project we are LEAVING, before anything moves.
+    saveSession();
+
+    // Tear the canvas down. Terminals die with their panes — which is correct: a
+    // shell sitting in the old project is not something you want silently carried
+    // into the new one.
+    restoring_ = true;
+    for (Pane* p : canvas_->panes()) canvas_->removePane(p);
+
+    project_ = abs;
+    wsId_ = workspaceId(abs);
+
+    // THE PART THAT ACTUALLY MATTERS. Nearly everything downstream — the crew, the
+    // git pane, the file tree, every tool a coder runs — resolves against the
+    // working directory or the tool root. Change one and forget the other and you
+    // get an app that LOOKS like it opened your project while quietly still editing
+    // the old one.
+    QDir::setCurrent(abs);
+    Tools::setThreadRoot(abs);
+    Config::load();  // a project may carry its own ./.ollamadev.json
+
+    // Bookmark it, so `ollamadev ws list` and this menu both know about it next time.
+    Workspaces::add(abs);
+
+    setWindowTitle(QStringLiteral("OllamaDev ADE — %1").arg(QFileInfo(abs).fileName()));
+    projectBtn_->setText(QFileInfo(abs).fileName());
+    projectBtn_->setToolTip(abs);
+
+    restoring_ = false;
+    loadSession();  // this project's own saved layout, or a fresh one
+    status(tr("opened %1").arg(abs));
 }
 
 QJsonObject MainWindow::captureState() const {
