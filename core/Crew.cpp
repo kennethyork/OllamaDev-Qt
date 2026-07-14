@@ -671,11 +671,29 @@ Crew::Result Crew::securityScan(const CrewOptions& opts, const CrewEvents& ev,
     QVector<QStringList> buckets(groups);
     for (int i = 0; i < sources.size(); ++i) buckets[i % groups].append(sources[i]);
 
+    // Each scanner is a board card, so a security scan shows up on the kanban like
+    // any crew — same To-do/Doing/Done columns, just scanners instead of coders.
+    const QString boardTask = QStringLiteral("🛡 security scan") +
+                              (opts.focus.isEmpty() ? QString() : ": " + opts.focus);
+    QVector<Subtask> scanners(groups);
+    for (int g = 0; g < groups; ++g) {
+        scanners[g].n = g + 1;
+        scanners[g].role = QStringLiteral("scanner");
+        scanners[g].title = QStringLiteral("scan %1 file(s)").arg(buckets[g].size());
+        scanners[g].state = "todo";
+        scanners[g].backend = sb;
+        scanners[g].model = sm;
+    }
+    publishBoard(runId, boardTask, scanners, true);
+
     phase("hunt", QStringLiteral("%1 scanners reading the tree").arg(groups));
     const auto reports = parallelRun(
         groups, [&](int) { return limiterKey(sb, sm); },
         [&](int g) -> QJsonObject {
             if (cancel.cancelled() || buckets[g].isEmpty()) return {};
+            scanners[g].state = "doing";
+            if (ev.onCoderState) ev.onCoderState(g + 1, "doing");
+            publishBoard(runId, boardTask, scanners, true);
             Agent a(sb, sm);
             Permission::setMode(PermMode::ReadOnly);
             Permission::setInteractive(false);
@@ -695,6 +713,14 @@ Crew::Result Crew::securityScan(const CrewOptions& opts, const CrewEvents& ev,
                                       {"user", usr, {}, {}, {}, {}, {}}};
             const QString finding =
                 a.loop(msgs, Config::integer("crew.researchIterations", 6), {}, cancel);
+            // A scanner that turned up something concrete is "held" (needs your
+            // eyes); a clean area is "done".
+            const bool hit = finding.contains(QLatin1Char('[')) &&
+                             !finding.toLower().contains(QStringLiteral("no ")) &&
+                             !finding.trimmed().isEmpty();
+            scanners[g].state = hit ? "held" : "done";
+            if (ev.onCoderState) ev.onCoderState(g + 1, scanners[g].state);
+            publishBoard(runId, boardTask, scanners, true);
             return QJsonObject{{"g", g + 1}, {"text", finding}};
         });
 
@@ -712,6 +738,7 @@ Crew::Result Crew::securityScan(const CrewOptions& opts, const CrewEvents& ev,
     }
     const QString path = runDir(runId) + "/security-report.md";
     writeFile(path, report);
+    publishBoard(runId, boardTask, scanners, false);  // scan finished — board goes idle
     if (ev.onLog) ev.onLog(QStringLiteral("report written: %1").arg(path));
     phase("done", QStringLiteral("scanned %1 files across %2 scanners")
                       .arg(sources.size())
