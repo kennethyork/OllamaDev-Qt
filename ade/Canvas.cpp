@@ -15,6 +15,7 @@
 #include <cmath>
 #include <utility>
 
+#include "Minimap.h"
 #include "Pane.h"
 #include "Theme.h"
 
@@ -311,7 +312,20 @@ void Canvas::contextMenuEvent(QContextMenuEvent* e) {
 void Canvas::resizeEvent(QResizeEvent* e) {
     QGraphicsView::resizeEvent(e);
     placeZoomControl();
+    if (minimap_) minimap_->reposition();
 }
+
+void Canvas::setMinimapVisible(bool on) {
+    if (on && !minimap_) {
+        minimap_ = new Minimap(this, this);
+        minimap_->show();
+    } else if (minimap_) {
+        minimap_->setVisible(on);
+        if (on) minimap_->reposition();
+    }
+}
+
+bool Canvas::minimapVisible() const { return minimap_ && minimap_->isVisible(); }
 
 void Canvas::refreshTheme() {
     resetCachedContent();

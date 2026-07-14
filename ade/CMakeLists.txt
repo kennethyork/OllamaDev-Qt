@@ -16,6 +16,7 @@ qt_add_executable(ollamadev-ade
     GraphPane.cpp GraphPane.h
     TopologyPane.cpp TopologyPane.h
     CoderPane.cpp CoderPane.h
+    Minimap.cpp Minimap.h
     ChatPane.cpp ChatPane.h
     GitPane.cpp GitPane.h
     GitGraph.cpp GitGraph.h

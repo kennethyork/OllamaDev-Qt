@@ -20,6 +20,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
+#include <QSettings>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPushButton>
@@ -204,6 +205,21 @@ void MainWindow::buildTopBar() {
     connect(mmenu->addAction(tr("Hooks…")), &QAction::triggered, this,
             [this] { ManageDialogs::openHooks(*this); });
     mmenu->addSeparator();
+    // The overview map. Remembered, because it is a matter of taste: on a canvas
+    // with three panes it is clutter, and on one with fifteen it is the only way to
+    // know where anything is.
+    auto* mapAct = mmenu->addAction(tr("Overview map"));
+    mapAct->setCheckable(true);
+    {
+        QSettings s;
+        const bool on = s.value(QStringLiteral("canvas/minimap"), true).toBool();
+        mapAct->setChecked(on);
+        canvas_->setMinimapVisible(on);
+    }
+    connect(mapAct, &QAction::toggled, this, [this](bool on) {
+        canvas_->setMinimapVisible(on);
+        QSettings().setValue(QStringLiteral("canvas/minimap"), on);
+    });
     connect(mmenu->addAction(tr("Theme editor…")), &QAction::triggered, this,
             [this] { ThemeDialog::open(this); });
     manage->setMenu(mmenu);

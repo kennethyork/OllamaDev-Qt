@@ -13,6 +13,7 @@ class QWidget;
 namespace odv {
 
 class Pane;
+class Minimap;
 
 // The infinite canvas: a pannable, zoomable surface holding floating windows.
 // Port of renderFree / bindCanvas / setZoom / wireFree from the PHP app.js.
@@ -65,6 +66,12 @@ public:
 
     void refreshTheme();
 
+    // The overview map, bottom-left. An infinite canvas has one failure mode — you
+    // pan away, lose every pane off-screen, and cannot tell which direction they
+    // are in. Toggleable, because on a small canvas it is just clutter.
+    void setMinimapVisible(bool on);
+    bool minimapVisible() const;
+
 signals:
     void paneClosed(const QString& id);
     void contextMenuRequestedAt(const QPoint& globalPos, const QPointF& worldPos);
@@ -98,6 +105,8 @@ private:
     QRectF maxSaved_;      // its pre-maximise geometry
 
     QWidget* zoomCtl_ = nullptr;
+
+    Minimap* minimap_ = nullptr;
     QLabel* zoomLabel_ = nullptr;
 };
 
