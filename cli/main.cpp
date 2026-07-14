@@ -128,8 +128,8 @@ void printHelp() {
           << "  ollamadev crew accept <n>    apply held work into your folder\n"
           << "  ollamadev crew discard <n>   throw held work away\n"
           << "  ollamadev crew steer <n> \"…\" talk to a running coder\n"
-          << "  ollamadev crew resume [id]   finish an interrupted run (no id = latest)\n"
-          << "                               add --replan to re-run the Director on the saved task\n"
+          << "  ollamadev crew resume [id]   finish an interrupted run: keep what's done,\n"
+          << "                               the Director re-plans what's left (--replay to skip it)\n"
           << "  ollamadev crew role|pack     personas the Director assigns · saved crew configs\n"
           << "  ollamadev board              pending decisions\n"
           << "  crew brain options (all opt-in — plain crew is unchanged):\n"
@@ -278,8 +278,8 @@ int cmdCrewResume(const QStringList& args) {
         out().flush();
         return 0;
     }
-    const bool replan = hasFlag(args, "--replan");
-    QString runId = positionals(args).value(0);  // first non-flag word
+    const bool replay = hasFlag(args, "--replay");  // opt out of the default re-plan
+    QString runId = positionals(args).value(0);      // first non-flag word
     if (runId.isEmpty()) {
         if (runs.isEmpty()) {
             err() << "no run to resume — start one with: ollamadev crew \"…\"\n";
@@ -288,12 +288,12 @@ int cmdCrewResume(const QStringList& args) {
         }
         runId = runs.first().runId;  // newest
     }
-    out() << "resuming " << runId << (replan ? " (re-planning)\n" : "\n");
+    out() << "resuming " << runId << (replay ? " (replaying the saved plan)\n" : " (re-planning what's left)\n");
     out().flush();
     CrewOptions o;
     o.resumeRunId = runId;
-    o.replan = replan;
-    o.maxCoders = flagValue(args, "--max", "4").toInt();  // used only when --replan re-runs the Director
+    o.replay = replay;
+    o.maxCoders = flagValue(args, "--max", "4").toInt();  // bounds the Director's re-plan
     return runCrewAndReport(o);
 }
 

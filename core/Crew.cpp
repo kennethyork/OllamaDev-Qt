@@ -85,8 +85,16 @@ void publishBoard(const QString& runId, const QString& task, const QVector<Subta
 // tracks live state but drops the coder prompts; plan.json keeps them (plus the
 // task/focus/land) so an interrupted run can be resumed with no model calls to
 // rebuild it. The two files together are everything `crew resume` needs.
-void writePlan(const QString& runId, const QString& task, const QString& focus,
-               const QString& land, bool audit, bool learn, const QVector<Subtask>& subs) {
+struct PlanFlags {
+    bool audit = true;
+    bool learn = false;
+    bool route = false;
+    bool debate = false;
+    bool dedupe = false;
+};
+
+void writePlan(const QString& runId, const QString& task, const QString& focus, const QString& land,
+               const PlanFlags& f, const QVector<Subtask>& subs) {
     QJsonArray arr;
     for (const auto& s : subs) {
         arr.append(QJsonObject{{"n", s.n},
@@ -97,8 +105,9 @@ void writePlan(const QString& runId, const QString& task, const QString& focus,
                                {"model", s.model},
                                {"route", s.route}});
     }
-    QJsonObject o{{"task", task},   {"focus", focus}, {"land", land},
-                  {"audit", audit}, {"learn", learn}, {"subtasks", arr}};
+    QJsonObject o{{"task", task},         {"focus", focus},   {"land", land},
+                  {"audit", f.audit},     {"learn", f.learn}, {"route", f.route},
+                  {"debate", f.debate},   {"dedupe", f.dedupe}, {"subtasks", arr}};
     writeFile(runDir(runId) + "/plan.json", QString::fromUtf8(json::encode(o)));
 }
 
@@ -116,9 +125,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     Result out;
     const QString projectRoot = QDir::currentPath();
     const bool resuming = !opts.resumeRunId.isEmpty();
-    // --replan keeps the run's identity and research but has the Director rebuild
-    // the plan from scratch, so the "load subtasks from disk" path is bypassed.
-    const bool replan = resuming && opts.replan;
+    // Resume brings the Director back by default to re-plan the leftover work;
+    // --replay (opts.replay) opts out to a literal re-run of the saved subtasks.
+    const bool replan = resuming && !opts.replay;
     const QString runId = resuming ? opts.resumeRunId : newRunId();
     out.runId = runId;
 
@@ -137,6 +146,12 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const QString landMode = resuming ? plan.value("land").toString(opts.land) : opts.land;
     const bool doAudit = resuming ? plan.value("audit").toBool(opts.audit) : opts.audit;
     const bool doLearn = resuming ? plan.value("learn").toBool(opts.learn) : opts.learn;
+    // The brain settings ride in the plan too, so a crew launched with routing /
+    // debate / dedupe keeps them when resumed — the re-planned leftovers get the
+    // same treatment the original run had.
+    const bool doRoute = resuming ? plan.value("route").toBool(opts.route) : opts.route;
+    const bool doDebate = resuming ? plan.value("debate").toBool(opts.debate) : opts.debate;
+    const bool doDedupe = resuming ? plan.value("dedupe").toBool(opts.dedupe) : opts.dedupe;
 
     const QString sessionBackend = Config::str("model.backend", "ollama");
     const QString sessionModel = Config::str("ollama.defaultModel", "");
@@ -164,7 +179,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     auto routedForTier = [&](const QString& backendId, const QString& want,
                              const QString& tier) -> QString {
         if (!want.isEmpty()) return want;
-        if (opts.route && backendId == QLatin1String("ollama")) return Router::modelForTier(tier);
+        if (doRoute && backendId == QLatin1String("ollama")) return Router::modelForTier(tier);
         return modelFor(backendId, want);
     };
 
@@ -207,42 +222,21 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         }
     }
 
-    // ---- Plan: rebuild from disk on resume, else the Director decomposes ----
+    // ---- Plan: fresh Director, replayed from disk, or re-planned leftovers ----
     // Swarm mode raises the ceiling; the per-backend limiter still throttles real
     // concurrency, so a big number just means more queued work, not more GPU load.
     const int cap = opts.swarmMax > 0 ? qMin(opts.swarmMax, 64) : 8;
     const int maxCoders = qBound(1, opts.maxCoders, cap);
     QVector<Subtask> subs;
-    if (resuming && !replan) {
-        // The saved plan carries each coder's prompt/model; current.json carries
-        // its last live state. A coder that reached "done" or "held" is complete
-        // (landed, or already awaiting a human on the board) and is NOT re-run;
-        // anything still "todo"/"doing" was interrupted and is reset to "todo".
-        QHash<int, QString> live;
-        for (const auto& v : boardState().value("subtasks").toArray()) {
-            const auto o = v.toObject();
-            live.insert(o.value("n").toInt(), o.value("state").toString());
-        }
-        for (const auto& v : plan.value("subtasks").toArray()) {
-            const auto o = v.toObject();
-            Subtask s;
-            s.n = o.value("n").toInt();
-            s.title = o.value("title").toString();
-            s.role = o.value("role").toString("coder");
-            s.prompt = o.value("prompt").toString(s.title);
-            s.backend = o.value("backend").toString();
-            s.model = o.value("model").toString();
-            s.route = o.value("route").toString();
-            const QString st = live.value(s.n);
-            s.state = (st == "done" || st == "held") ? st : "todo";
-            if (!s.title.isEmpty()) subs.append(s);
-        }
-        int rerun = 0;
-        for (const auto& s : subs)
-            if (s.state == "todo") ++rerun;
-        phase("resume", QStringLiteral("%1 of %2 coders still to run").arg(rerun).arg(subs.size()));
-    } else {
-        phase("plan", "director is decomposing the task");
+
+    // The Director, factored out so a fresh run AND a --replan can both call it.
+    // It appends new subtasks to `subs`, numbering them from startN+1 so
+    // re-planned work never collides with the finished coders we keep. When
+    // `doneNote` is non-empty the Director is told what is already finished and
+    // asked to plan ONLY the remaining work. Returns how many subtasks it added.
+    auto runDirector = [&](int startN, const QString& doneNote) -> int {
+        phase("plan", doneNote.isEmpty() ? "director is decomposing the task"
+                                         : "director is planning the remaining work");
         const QString db = backendFor(opts.directorBackend);
         Agent d(db, routedForTier(db, opts.directorModel, QStringLiteral("hard")));
         QString sys = QStringLiteral(
@@ -256,6 +250,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         sys += "\n\nAssign each subtask the most fitting role:\n" + CrewRoles::catalog();
         QString usr = "Task: " + task;
         if (!focus.isEmpty()) usr += "\nFocus: " + focus;
+        if (!doneNote.isEmpty())
+            usr += "\n\nThese parts are ALREADY DONE — do NOT plan them again; plan ONLY the work "
+                   "still needed to finish the task:\n" + doneNote;
         if (!research.isEmpty()) usr += "\n\nResearch findings:\n" + research.left(6000);
 
         auto backend = Backends::get(d.backendId());
@@ -282,9 +279,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             if (attempt == 0 && ev.onLog) ev.onLog("director reply did not parse — retrying");
         }
 
-        int n = 0;
+        int added = 0, n = startN;
         for (const auto& v : planned) {
-            if (n >= maxCoders) break;
+            if (added >= maxCoders) break;
             const auto o = v.toObject();
             Subtask s;
             s.n = ++n;
@@ -304,7 +301,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 const QString pinned = CrewRoles::get(s.role).model;
                 if (!pinned.isEmpty()) {
                     s.model = pinned;
-                } else if (opts.route && s.backend == QLatin1String("ollama")) {
+                } else if (doRoute && s.backend == QLatin1String("ollama")) {
                     // Route each coder on its OWN subtask — a "rename a variable"
                     // subtask and a "design the parser" subtask should not get the
                     // same model just because they are in the same run.
@@ -317,7 +314,64 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                     s.model = b->defaultModel();
                 }
             }
-            if (!s.title.isEmpty()) subs.append(s);
+            if (!s.title.isEmpty()) {
+                subs.append(s);
+                ++added;
+            }
+        }
+        return added;
+    };
+
+    if (!resuming) {
+        runDirector(0, QString());
+    } else {
+        // Replay the interrupted run's live state to see which coders finished.
+        // A "done" coder BUILT a changeset (it is re-landed from disk, never
+        // re-run); a "held" coder is already awaiting a human on the board. Both
+        // are kept as-is and are NEVER redone. Only "todo"/"doing" coders were
+        // genuinely cut off.
+        QHash<int, QString> liveState;
+        for (const auto& v : boardState().value("subtasks").toArray()) {
+            const auto o = v.toObject();
+            liveState.insert(o.value("n").toInt(), o.value("state").toString());
+        }
+        QStringList doneTitles;
+        int maxN = 0, kept = 0, rerun = 0;
+        for (const auto& v : plan.value("subtasks").toArray()) {
+            const auto o = v.toObject();
+            Subtask s;
+            s.n = o.value("n").toInt();
+            s.title = o.value("title").toString();
+            s.role = o.value("role").toString("coder");
+            s.prompt = o.value("prompt").toString(s.title);
+            s.backend = o.value("backend").toString();
+            s.model = o.value("model").toString();
+            s.route = o.value("route").toString();
+            maxN = qMax(maxN, s.n);
+            const QString st = liveState.value(s.n);
+            if (st == "done" || st == "held") {
+                s.state = st;  // finished — kept, landed from disk, never re-run
+                if (st == "done") doneTitles << s.title;
+                if (!s.title.isEmpty()) {
+                    subs.append(s);
+                    ++kept;
+                }
+            } else if (!replan) {
+                s.state = "todo";  // plain resume: re-run this interrupted coder
+                if (!s.title.isEmpty()) {
+                    subs.append(s);
+                    ++rerun;
+                }
+            }
+            // --replan: an unfinished coder's OLD subtask is dropped here; the
+            // Director re-plans the remaining work just below.
+        }
+        if (replan) {
+            const QString note = doneTitles.isEmpty() ? QString() : "- " + doneTitles.join("\n- ");
+            rerun = runDirector(maxN, note);
+            phase("resume", QStringLiteral("kept %1 finished · re-planned %2 to run").arg(kept).arg(rerun));
+        } else {
+            phase("resume", QStringLiteral("%1 finished · %2 to run").arg(kept).arg(rerun));
         }
     }
     if (subs.isEmpty()) {
@@ -329,12 +383,14 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // Persist the plan the moment it exists (fresh runs only — on resume it is
     // already on disk). From here on an interruption is recoverable: plan.json has
     // the prompts, current.json has the live state.
-    if (!resuming || replan) writePlan(runId, task, focus, landMode, doAudit, doLearn, subs);
+    if (!resuming || replan)
+        writePlan(runId, task, focus, landMode,
+                  PlanFlags{doAudit, doLearn, doRoute, doDebate, doDedupe}, subs);
 
     // Always show who is doing what on which model — the "different models for
     // different parts" view, whether they were routed or set by hand.
     if (ev.onLog) {
-        ev.onLog(QStringLiteral("model plan%1:").arg(opts.route ? " (routed)" : ""));
+        ev.onLog(QStringLiteral("model plan%1:").arg(doRoute ? " (routed)" : ""));
         for (const auto& s : subs) {
             ev.onLog(QStringLiteral("  coder #%1 [%2] %3:%4%5")
                          .arg(s.n)
@@ -380,11 +436,14 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         stores[i] = csRoot + QStringLiteral("/c%1").arg(i + 1);
     }
     // On resume a coder is skipped when it is "held" (already awaiting a human on
-    // the board); a "done" coder's changeset is reloaded from disk and re-audited
-    // and re-landed (idempotent — applying identical files is a no-op), which
-    // finishes a run interrupted between capture and landing. Only "todo" coders
-    // get a fresh sandbox and actually run.
+    // the board) or "done". A "done" coder BUILT its changeset before the run was
+    // cut off: it is reloaded from disk and landed as-is — never re-run and never
+    // re-audited (we trust work that already passed), so a finished coder costs
+    // zero model calls on resume. Only "todo" coders get a fresh sandbox and run.
     auto skipRun = [&](int i) { return subs[i].state == "done" || subs[i].state == "held"; };
+    QSet<int> reloaded;  // finished-and-reloaded coders — landed from disk, not re-audited
+    for (int i = 0; i < subs.size(); ++i)
+        if (subs[i].state == "done") reloaded.insert(i);
     // Starter skills whose triggers match this crew's focus. They are written into
     // each sandbox, where the coder discovers them as ordinary project skills and
     // pulls each body on demand via the `skill` tool — the system prompt only ever
@@ -404,6 +463,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                     r.store = cs.store;
                     r.files = cs.files();
                     r.diff = cs.diff;
+                    r.audit.clean = true;  // already passed once — land it, don't re-audit
                     results[i] = r;
                     return {};
                 }
@@ -511,7 +571,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         parallelRun(
             results.size(), [&](int) { return limiterKey(ab, am); },
             [&](int i) -> QJsonObject {
-                if (results[i].empty || cancel.cancelled()) return {};
+                // Reloaded (already-finished) coders keep their prior clean verdict —
+                // resume never re-audits work that already passed.
+                if (results[i].empty || reloaded.contains(i) || cancel.cancelled()) return {};
                 auto backend = Backends::get(ab);
                 if (!backend) return {};
                 const QString sys =
@@ -539,7 +601,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // Advocate argues to land it, Skeptic argues to hold it, Judge decides — the
     // MDASH "debate" stage, scoped to one changeset. Runs in parallel per coder,
     // and its verdict overrides the single auditor's.
-    if (opts.debate && !cancel.cancelled()) {
+    if (doDebate && !cancel.cancelled()) {
         phase("debate", "arguing every changeset");
         const QString jb = backendFor(opts.auditorBackend);
         const QString jm = routedForTier(jb, opts.auditorModel, QStringLiteral("hard"));
@@ -590,7 +652,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // changesets; every non-primary member of a duplicate group is marked so
     // landing holds it. No model call when there is nothing that could overlap.
     QHash<int, int> dupOf;  // coder n -> the coder it duplicates
-    if (opts.dedupe && !cancel.cancelled()) {
+    if (doDedupe && !cancel.cancelled()) {
         QVector<int> live;
         for (int i = 0; i < results.size(); ++i)
             if (!results[i].empty) live.append(i);
@@ -629,12 +691,15 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const bool reviewMode = (landMode == "review");
     QHash<QString, int> touched;  // file -> the coder that already claimed it
 
-    auto hold = [&](const CoderResult& r, const QString& reason) {
+    // results[i] is aligned with subs[i]; index by i, NOT by coder number (a
+    // --replan renumbers new coders past the kept ones, so n-1 is not the index).
+    auto hold = [&](int i, const QString& reason) {
+        const CoderResult& r = results[i];
         out.held.append(r.n);
-        subs[r.n - 1].state = "held";
+        subs[i].state = "held";
         Decision d;
         d.kind = "crew_branch";
-        d.summary = QStringLiteral("coder #%1 — %2").arg(r.n).arg(subs[r.n - 1].title);
+        d.summary = QStringLiteral("coder #%1 — %2").arg(r.n).arg(subs[i].title);
         d.detail = r.diff.left(60000);
         d.data = QJsonObject{{"runId", runId},
                              {"n", r.n},
@@ -646,13 +711,14 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         if (ev.onLog) ev.onLog(QStringLiteral("held #%1 — %2").arg(r.n).arg(reason));
     };
 
-    for (auto& r : results) {
+    for (int i = 0; i < results.size(); ++i) {
+        CoderResult& r = results[i];
         if (r.n == 0 || r.empty) continue;
 
         // Dedupe verdict (only populated when --dedupe ran): a coder whose work
         // duplicates another's is held rather than landed twice.
         if (dupOf.contains(r.n)) {
-            hold(r, QStringLiteral("duplicates coder #%1").arg(dupOf.value(r.n)));
+            hold(i, QStringLiteral("duplicates coder #%1").arg(dupOf.value(r.n)));
             continue;
         }
 
@@ -662,15 +728,15 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         for (const auto& f : SecScan::scanDiff(r.diff))
             if (f.severity == "high") high.append(f);
         if (!high.isEmpty()) {
-            hold(r, QStringLiteral("secret detected (%1) — not auto-applied").arg(high.size()));
+            hold(i, QStringLiteral("secret detected (%1) — not auto-applied").arg(high.size()));
             continue;
         }
         if (reviewMode) {
-            hold(r, "review mode");
+            hold(i, "review mode");
             continue;
         }
         if (!r.audit.clean) {
-            hold(r, "audit flagged: " + r.audit.summary);
+            hold(i, "audit flagged: " + r.audit.summary);
             continue;
         }
 
@@ -684,19 +750,19 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             }
         }
         if (!clash.isEmpty()) {
-            hold(r, QStringLiteral("overlaps coder #%1 on %2").arg(touched[clash]).arg(clash));
+            hold(i, QStringLiteral("overlaps coder #%1 on %2").arg(touched[clash]).arg(clash));
             continue;
         }
 
         QStringList wrote;
         QString err;
         if (!Sandbox::apply(r.store, projectRoot, &wrote, &err)) {
-            hold(r, "could not write files: " + err);
+            hold(i, "could not write files: " + err);
             continue;
         }
         for (const auto& f : r.files) touched.insert(f, r.n);
         out.applied.append(r.n);
-        subs[r.n - 1].state = "done";
+        subs[i].state = "done";
         if (ev.onLog)
             ev.onLog(QStringLiteral("applied #%1 (%2 files)").arg(r.n).arg(wrote.size()));
     }
@@ -710,12 +776,13 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     if (doLearn && !cancel.cancelled()) {
         phase("learn", "distilling what this run taught");
         QString summary = "Task: " + task + "\n\n";
-        for (const auto& r : results) {
+        for (int i = 0; i < results.size(); ++i) {
+            const CoderResult& r = results[i];
             if (r.n == 0) continue;
             summary += QStringLiteral("- coder #%1 (%2): %3 — files: %4\n")
                            .arg(r.n)
                            .arg(out.applied.contains(r.n) ? "applied" : "held",
-                                r.audit.summary.isEmpty() ? subs[r.n - 1].title : r.audit.summary,
+                                r.audit.summary.isEmpty() ? subs[i].title : r.audit.summary,
                                 r.files.join(", "));
         }
         if (!research.isEmpty()) summary += "\nResearch:\n" + research.left(3000);
@@ -775,7 +842,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             for (const QString& l : lines) ev.onLog(l);
             ev.onLog(QStringLiteral("  %1%% ran on free local models%2")
                          .arg(local * 100 / total)
-                         .arg(opts.route ? QStringLiteral(" — routing kept the cheap work off the "
+                         .arg(doRoute ? QStringLiteral(" — routing kept the cheap work off the "
                                                           "paid models")
                                          : QString()));
         }

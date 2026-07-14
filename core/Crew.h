@@ -91,17 +91,17 @@ struct CrewOptions {
     // Off by default — the plain crew neither reads nor writes this.
     bool learn = false;
 
-    // Resume an interrupted run: skip Researcher + Director, reload the saved plan
-    // from disk (this runId's plan.json), re-run only the coders that never
-    // finished, then audit and land. Empty = a fresh run. When set, the plan on
-    // disk — not the other fields here — is the source of truth for the task,
-    // focus, and per-coder prompts/models.
+    // Resume an interrupted run: keep coders that already finished (landed from
+    // disk, or held on the board) untouched and finish the rest. Empty = a fresh
+    // run. When set, the plan on disk — not the other fields here — is the source
+    // of truth for the task, focus, and per-coder prompts/models.
+    //
+    // By default resume brings the Director back to RE-PLAN the leftover work
+    // (the finished coders are told to it as already-done, so it never re-plans
+    // them). Set `replay` to skip the Director and literally re-run the saved
+    // plan's unfinished subtasks instead.
     QString resumeRunId;
-
-    // Resume, but have the Director decompose the task AGAIN instead of replaying
-    // the saved plan: same run identity and research, a fresh subtask breakdown,
-    // every coder re-run. Only meaningful together with resumeRunId.
-    bool replan = false;
+    bool replay = false;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI

@@ -255,12 +255,16 @@ static void testCrewResume() {
           "run() branches on resumeRunId to reload the plan instead of re-planning");
     check(crew.contains("skipRun"),
           "resume skips coders that already finished (done/held)");
-    check(crew.contains("replan"),
-          "resume can re-run the Director (--replan) instead of replaying the plan");
+    check(crew.contains("replan") && crew.contains("doneTitles"),
+          "resume re-plans only the leftover work, telling the Director what's done");
+    check(crew.contains("reloaded") && crew.contains("audit.clean = true"),
+          "finished coders land from disk and are never re-audited on resume");
+    check(crew.contains("doRoute") && crew.contains("plan.value(\"route\")"),
+          "brain settings (route/debate/dedupe) survive a resume via the plan");
     const QString cli = readSource(QStringLiteral("cli/main.cpp"));
     check(cli.contains("cmdCrewResume") && cli.contains("\"resume\""),
           "CLI wires `crew resume`");
-    check(cli.contains("--replan"), "CLI exposes --replan on resume");
+    check(cli.contains("--replay"), "CLI exposes --replay (opt out of the default re-plan)");
 }
 
 int main(int argc, char** argv) {
