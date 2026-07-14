@@ -267,6 +267,44 @@ static void testCrewResume() {
     check(cli.contains("--replay"), "CLI exposes --replay (opt out of the default re-plan)");
 }
 
+// --amplify N: N Director plans (keep the modal one) + an N-reviewer audit panel
+// that needs a STRICT majority. And a crew pack must actually reach a run — the
+// pack keys were written to disk and then read by nobody, so `--amplify 3` in a
+// saved pack silently did nothing.
+static void testCrewAmplify() {
+    const QString crew = readSource(QStringLiteral("core/Crew.cpp"));
+    check(crew.contains("planOnce") && crew.contains("amplify <= 1"),
+          "the Director draws one plan per sample and short-circuits at amplify=1");
+    check(crew.contains("freq[c.size()]"),
+          "self-consistency keeps the plan whose subtask COUNT is the mode");
+    check(crew.contains("reviewOnce") && crew.contains("pass % 2 == 1"),
+          "the audit panel alternates neutral and skeptic seats");
+    check(crew.contains("clean * 2 > amplify"),
+          "a changeset lands only on a STRICT majority of clean votes (2-2 holds)");
+    check(crew.contains("plan.value(\"amplify\")"),
+          "amplify rides in plan.json, so a resumed run re-plans with the same rigour");
+
+    const QString cli = readSource(QStringLiteral("cli/main.cpp"));
+    check(cli.contains("o.amplify = num(\"--amplify\", \"amplify\", 1)"),
+          "CLI: --amplify wins over the pack, the pack over the default");
+    check(cli.contains("CrewPacks::load(packName)"),
+          "crew --pack loads a saved team as the base (it used to load nothing)");
+    check(cli.contains("\"--amplify\",         \"--pack\""),
+          "--amplify/--pack take a value, so they never swallow the task word");
+
+    // The real bug this guards: a pack key that no run reads. If someone adds a
+    // key to `crew pack save`, it has to be consumed in cmdCrew too.
+    const int save = cli.indexOf(QStringLiteral("int cmdCrewPack"));
+    const QString packSave = save < 0 ? QString() : cli.mid(save, 3000);
+    for (const QString& key : {QStringLiteral("focus"), QStringLiteral("coderModel"),
+                               QStringLiteral("amplify"), QStringLiteral("land"),
+                               QStringLiteral("route")}) {
+        check(packSave.contains(QStringLiteral("\"%1\"").arg(key)) &&
+                  cli.contains(QStringLiteral("\"%1\"").arg(key)),
+              QStringLiteral("pack key '%1' is both saved and read back").arg(key));
+    }
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -280,6 +318,7 @@ int main(int argc, char** argv) {
     s << "backends\n";   s.flush(); testBackends();
     s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent(); testCliBackendIsSandboxed(); testPerBackendModelRouting();
     s << "crew-resume\n"; s.flush(); testCrewResume();
+    s << "crew-amplify\n"; s.flush(); testCrewAmplify();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

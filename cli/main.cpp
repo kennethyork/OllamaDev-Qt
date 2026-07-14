@@ -87,7 +87,9 @@ QStringList positionals(const QStringList& a) {
         "--director-backend", "--director-model",
         "--auditor-backend", "--auditor-model",
         "--researcher-backend", "--researcher-model",
-        "--session",         "--swarm"};
+        "--session",         "--swarm",
+        "--amplify",         "--pack",
+        "--land"};
     QStringList out;
     for (int i = 0; i < a.size(); ++i) {
         const QString& t = a.at(i);
@@ -138,6 +140,9 @@ void printHelp() {
           << "    --dedupe                   hold coders whose work duplicates another's\n"
           << "    --security                 read-only vulnerability scan → a report\n"
           << "    --swarm N                  raise the coder cap for a bigger fan-out\n"
+          << "    --amplify N                N Director plans (keep the modal one) + an\n"
+          << "                               N-reviewer audit panel — majority rules\n"
+          << "    --pack <name>              start from a saved team; your flags still win\n"
           << "  ollamadev route [--run] \"…\"  show (or run) which model the brain picks\n\n"
           << "Context:\n"
           << "  ollamadev index build        semantic code index (also: status, clear)\n"
@@ -299,30 +304,70 @@ int cmdCrewResume(const QStringList& args) {
 
 int cmdCrew(const QStringList& args) {
     CrewOptions o;
-    o.task = args.value(0);
-    if (o.task.startsWith('-')) o.task.clear();
+    // The first non-flag word, so the task survives being written AFTER a flag
+    // (`crew --pack backend "add a /health route"`), which is the natural way to
+    // type it once packs exist.
+    o.task = positionals(args).value(0);
 
-    o.maxCoders = flagValue(args, "--max", "4").toInt();
+    // --pack <name>: a saved team is the BASE, and an explicit flag on this command
+    // line always beats it. That ordering is the whole point of a pack — it is a
+    // set of defaults you got tired of retyping, not a straitjacket.
+    QJsonObject pack;
+    const QString packName = flagValue(args, "--pack");
+    if (!packName.isEmpty()) {
+        pack = CrewPacks::load(packName);
+        if (pack.isEmpty()) {
+            err() << "no crew pack '" << packName << "' (list them with: ollamadev crew pack list)\n";
+            err().flush();
+            return 1;
+        }
+        out() << "crew pack: " << packName << "\n";
+        out().flush();
+    }
+    // Flag first, then the pack, then the built-in default.
+    auto str = [&](const char* flag, const char* key, const QString& def = QString()) {
+        const QString v = flagValue(args, flag);
+        return v.isEmpty() ? pack.value(QLatin1String(key)).toString(def) : v;
+    };
+    auto num = [&](const char* flag, const char* key, int def) {
+        const QString v = flagValue(args, flag);
+        return v.isEmpty() ? pack.value(QLatin1String(key)).toInt(def) : v.toInt();
+    };
+    // A --no-X flag can only turn something OFF, so the pack decides only when the
+    // flag is absent.
+    auto onOff = [&](const char* offFlag, const char* key) {
+        return hasFlag(args, offFlag) ? false : pack.value(QLatin1String(key)).toBool(true);
+    };
+    auto flagOr = [&](const char* flag, const char* key) {
+        return hasFlag(args, flag) ? true : pack.value(QLatin1String(key)).toBool(false);
+    };
+
+    o.maxCoders = num("--max", "max", 4);
     o.parallel = flagValue(args, "--parallel", "0").toInt();
-    o.focus = flagValue(args, "--focus");
-    o.research = !hasFlag(args, "--no-research");
-    o.audit = !hasFlag(args, "--no-audit");
-    o.route = hasFlag(args, "--route");  // auto-pick each role's model by difficulty
-    o.debate = hasFlag(args, "--debate");    // advocate/skeptic/judge per changeset
-    o.dedupe = hasFlag(args, "--dedupe");    // hold coders whose work duplicates another's
+    o.focus = str("--focus", "focus");
+    o.research = onOff("--no-research", "research");
+    o.audit = onOff("--no-audit", "audit");
+    o.route = flagOr("--route", "route");    // auto-pick each role's model by difficulty
+    o.debate = flagOr("--debate", "debate");  // advocate/skeptic/judge per changeset
+    o.dedupe = flagOr("--dedupe", "dedupe");  // hold coders whose work duplicates another's
     o.security = hasFlag(args, "--security"); // read-only vulnerability scan (no code changes)
     o.swarmMax = flagValue(args, "--swarm", "0").toInt();  // raise the coder cap
-    o.land = hasFlag(args, "--review") ? "review" : Config::str("crew.land", "auto");
-    o.coderBackend = flagValue(args, "--coder-backend");
-    o.coderModel = flagValue(args, "--coder-model");
+    // N-sample self-consistency: N Director plans (keep the modal one) + an
+    // N-reviewer audit panel that needs a strict majority to land anything.
+    o.amplify = num("--amplify", "amplify", 1);
+    o.land = hasFlag(args, "--review")
+                 ? QStringLiteral("review")
+                 : pack.value("land").toString(Config::str("crew.land", "auto"));
+    o.coderBackend = str("--coder-backend", "coderBackend");
+    o.coderModel = str("--coder-model", "coderModel");
     o.coderBackends = flagList(args, "--coder-backends");
     o.coderModels = flagList(args, "--coder-models");
-    o.directorBackend = flagValue(args, "--director-backend");
-    o.directorModel = flagValue(args, "--director-model");
-    o.auditorBackend = flagValue(args, "--auditor-backend");
-    o.auditorModel = flagValue(args, "--auditor-model");
-    o.researcherBackend = flagValue(args, "--researcher-backend");
-    o.researcherModel = flagValue(args, "--researcher-model");
+    o.directorBackend = str("--director-backend", "directorBackend");
+    o.directorModel = str("--director-model", "directorModel");
+    o.auditorBackend = str("--auditor-backend", "auditorBackend");
+    o.auditorModel = str("--auditor-model", "auditorModel");
+    o.researcherBackend = str("--researcher-backend", "researcherBackend");
+    o.researcherModel = str("--researcher-model", "researcherModel");
 
     if (o.task.isEmpty()) {
         err() << "crew needs a task: ollamadev crew \"build X\"\n";
@@ -1090,6 +1135,11 @@ int cmdCrewPack(const QStringList& args) {
         if (!amp.isEmpty()) pack.insert("amplify", amp.toInt());
         if (hasFlag(args, "--no-research")) pack.insert("research", false);
         if (hasFlag(args, "--no-audit")) pack.insert("audit", false);
+        // The brain belongs to the team too — a "hard backend work" pack that
+        // routes and debates is exactly the thing you get tired of retyping.
+        if (hasFlag(args, "--route")) pack.insert("route", true);
+        if (hasFlag(args, "--debate")) pack.insert("debate", true);
+        if (hasFlag(args, "--dedupe")) pack.insert("dedupe", true);
 
         const QString path = CrewPacks::save(name, pack);
         if (path.isEmpty()) {

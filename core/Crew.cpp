@@ -91,6 +91,7 @@ struct PlanFlags {
     bool route = false;
     bool debate = false;
     bool dedupe = false;
+    int amplify = 1;
 };
 
 void writePlan(const QString& runId, const QString& task, const QString& focus, const QString& land,
@@ -105,9 +106,10 @@ void writePlan(const QString& runId, const QString& task, const QString& focus, 
                                {"model", s.model},
                                {"route", s.route}});
     }
-    QJsonObject o{{"task", task},         {"focus", focus},   {"land", land},
-                  {"audit", f.audit},     {"learn", f.learn}, {"route", f.route},
-                  {"debate", f.debate},   {"dedupe", f.dedupe}, {"subtasks", arr}};
+    QJsonObject o{{"task", task},       {"focus", focus},     {"land", land},
+                  {"audit", f.audit},   {"learn", f.learn},   {"route", f.route},
+                  {"debate", f.debate}, {"dedupe", f.dedupe}, {"amplify", f.amplify},
+                  {"subtasks", arr}};
     writeFile(runDir(runId) + "/plan.json", QString::fromUtf8(json::encode(o)));
 }
 
@@ -152,6 +154,11 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     const bool doRoute = resuming ? plan.value("route").toBool(opts.route) : opts.route;
     const bool doDebate = resuming ? plan.value("debate").toBool(opts.debate) : opts.debate;
     const bool doDedupe = resuming ? plan.value("dedupe").toBool(opts.dedupe) : opts.dedupe;
+    // Self-consistency rides in the plan too, so a resumed run re-plans its
+    // leftovers with the same rigour the original run was given. Clamped: past a
+    // handful of samples the consensus stops moving and you are just buying tokens.
+    const int amplify =
+        qBound(1, resuming ? plan.value("amplify").toInt(opts.amplify) : opts.amplify, 9);
 
     const QString sessionBackend = Config::str("model.backend", "ollama");
     const QString sessionModel = Config::str("ollama.defaultModel", "");
@@ -257,26 +264,71 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
         auto backend = Backends::get(d.backendId());
 
+        // One plan, one model call.
+        //
         // Models do not reliably honour the schema on the first try — a cloud
         // model in particular will sometimes answer in prose. One firm retry
         // costs a few seconds and turns an intermittent "no subtasks" failure
         // into a non-event.
+        auto planOnce = [&]() -> QJsonArray {
+            QJsonArray planned;
+            for (int attempt = 0; attempt < 2 && backend && !cancel.cancelled(); ++attempt) {
+                QString ask = usr;
+                if (attempt > 0)
+                    ask += "\n\nYour previous reply could not be parsed. Reply with NOTHING but the "
+                           "JSON object described above.";
+                const QJsonObject o =
+                    backend->chatJson(d.model(),
+                                      {{"system", sys, {}, {}, {}, {}, {}},
+                                       {"user", ask, {}, {}, {}, {}, {}}},
+                                      cancel);
+                planned = o.value("subtasks").toArray();
+                // Tolerate a bare array, or a single object, the way the PHP planner did.
+                if (planned.isEmpty() && o.contains("title")) planned.append(o);
+                if (!planned.isEmpty()) break;
+                if (attempt == 0 && ev.onLog) ev.onLog("director reply did not parse — retrying");
+            }
+            return planned;
+        };
+
+        // Self-consistency: draw `amplify` independent plans and keep the one whose
+        // subtask COUNT is the most common. Planning variance is where a weak model
+        // hurts most — it will split a task 3 ways once and 6 ways the next time —
+        // and the modal shape is the one it actually believes. Cheap because the
+        // Director is one call; the coders are unaffected.
         QJsonArray planned;
-        for (int attempt = 0; attempt < 2 && backend && !cancel.cancelled(); ++attempt) {
-            QString ask = usr;
-            if (attempt > 0)
-                ask += "\n\nYour previous reply could not be parsed. Reply with NOTHING but the "
-                       "JSON object described above.";
-            const QJsonObject o =
-                backend->chatJson(d.model(),
-                                  {{"system", sys, {}, {}, {}, {}, {}},
-                                   {"user", ask, {}, {}, {}, {}, {}}},
-                                  cancel);
-            planned = o.value("subtasks").toArray();
-            // Tolerate a bare array, or a single object, the way the PHP planner did.
-            if (planned.isEmpty() && o.contains("title")) planned.append(o);
-            if (!planned.isEmpty()) break;
-            if (attempt == 0 && ev.onLog) ev.onLog("director reply did not parse — retrying");
+        if (amplify <= 1) {
+            planned = planOnce();
+        } else {
+            QVector<QJsonArray> cands;
+            for (int i = 0; i < amplify && !cancel.cancelled(); ++i) {
+                const QJsonArray p = planOnce();
+                if (!p.isEmpty()) cands.append(p);
+            }
+            if (!cands.isEmpty()) {
+                QHash<int, int> freq;  // subtask count -> how many plans agreed on it
+                for (const auto& c : cands) ++freq[c.size()];
+                int modeCount = cands.first().size(), best = 0;
+                for (auto it = freq.constBegin(); it != freq.constEnd(); ++it) {
+                    // Ties break toward the SMALLER plan: fewer coders is the cheaper
+                    // and less conflict-prone bet when the model is genuinely torn.
+                    if (it.value() > best || (it.value() == best && it.key() < modeCount)) {
+                        best = it.value();
+                        modeCount = it.key();
+                    }
+                }
+                for (const auto& c : cands) {
+                    if (c.size() == modeCount) {
+                        planned = c;
+                        break;
+                    }
+                }
+                if (ev.onLog)
+                    ev.onLog(QStringLiteral("director drew %1 plans · %2 agreed on %3 subtasks")
+                                 .arg(cands.size())
+                                 .arg(best)
+                                 .arg(modeCount));
+            }
         }
 
         int added = 0, n = startN;
@@ -385,7 +437,7 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // the prompts, current.json has the live state.
     if (!resuming || replan)
         writePlan(runId, task, focus, landMode,
-                  PlanFlags{doAudit, doLearn, doRoute, doDebate, doDedupe}, subs);
+                  PlanFlags{doAudit, doLearn, doRoute, doDebate, doDedupe, amplify}, subs);
 
     // Always show who is doing what on which model — the "different models for
     // different parts" view, whether they were routed or set by hand.
@@ -565,7 +617,9 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
 
     // ---- Auditors, also in parallel ---------------------------------------
     if (doAudit && !cancel.cancelled()) {
-        phase("audit", "reviewing every changeset");
+        phase("audit", amplify > 1
+                           ? QStringLiteral("%1-reviewer panel on every changeset").arg(amplify)
+                           : QStringLiteral("reviewing every changeset"));
         const QString ab = backendFor(opts.auditorBackend);
         const QString am = routedForTier(ab, opts.auditorModel, QStringLiteral("hard"));
         parallelRun(
@@ -576,20 +630,62 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
                 if (results[i].empty || reloaded.contains(i) || cancel.cancelled()) return {};
                 auto backend = Backends::get(ab);
                 if (!backend) return {};
-                const QString sys =
-                    "You are the Auditor. Review this changeset for correctness, security, and "
-                    "scope creep. Mark it unclean if it is wrong, unsafe, or does work outside "
-                    "the stated subtask. Reply with JSON only: "
-                    "{\"clean\":true|false,\"summary\":\"one line\",\"issues\":[\"...\"]}";
-                const QString usr = "Subtask: " + subs[i].title + "\n\nDiff:\n" +
-                                    results[i].diff.left(16000);
-                const QJsonObject v = backend->chatJson(
-                    am, {{"system", sys, {}, {}, {}, {}, {}}, {"user", usr, {}, {}, {}, {}, {}}},
-                    cancel);
-                results[i].audit.clean = v.value("clean").toBool(false);
-                results[i].audit.summary = v.value("summary").toString();
-                for (const auto& is : v.value("issues").toArray())
-                    results[i].audit.issues << is.toString();
+
+                // One reviewer's verdict. A skeptic is told to hunt for a reason to
+                // reject — with amplify on, every other seat is one, so a change has
+                // to convince an adversary and not just a neutral reader.
+                auto reviewOnce = [&](bool skeptic) -> AuditResult {
+                    const QString stance =
+                        skeptic
+                            ? QStringLiteral(
+                                  "You are a SKEPTICAL adversarial reviewer. Actively hunt for a "
+                                  "reason to reject this changeset; when in doubt, mark it unclean. ")
+                            : QStringLiteral("You are the Auditor. ");
+                    const QString sys =
+                        stance +
+                        "Review this changeset for correctness, security, and scope creep. Mark it "
+                        "unclean if it is wrong, unsafe, or does work outside the stated subtask. "
+                        "Reply with JSON only: "
+                        "{\"clean\":true|false,\"summary\":\"one line\",\"issues\":[\"...\"]}";
+                    const QString usr =
+                        "Subtask: " + subs[i].title + "\n\nDiff:\n" + results[i].diff.left(16000);
+                    const QJsonObject v = backend->chatJson(
+                        am, {{"system", sys, {}, {}, {}, {}, {}}, {"user", usr, {}, {}, {}, {}, {}}},
+                        cancel);
+                    AuditResult a;
+                    a.clean = v.value("clean").toBool(false);
+                    a.summary = v.value("summary").toString();
+                    for (const auto& is : v.value("issues").toArray()) a.issues << is.toString();
+                    return a;
+                };
+
+                if (amplify <= 1) {
+                    results[i].audit = reviewOnce(false);
+                    return {};
+                }
+
+                // The panel: alternate neutral and skeptic seats, and land the change
+                // only on a STRICT majority of clean votes. A 2-2 split holds it.
+                int clean = 0;
+                AuditResult panel;
+                for (int pass = 0; pass < amplify && !cancel.cancelled(); ++pass) {
+                    const AuditResult a = reviewOnce(pass % 2 == 1);
+                    if (a.clean) {
+                        ++clean;
+                    } else {
+                        for (const QString& is : a.issues)
+                            if (!panel.issues.contains(is)) panel.issues << is;
+                    }
+                    if (panel.summary.isEmpty()) panel.summary = a.summary;
+                }
+                panel.clean = clean * 2 > amplify;
+                panel.summary = QStringLiteral("%1/%2 reviewers clean%3")
+                                    .arg(clean)
+                                    .arg(amplify)
+                                    .arg(panel.summary.isEmpty()
+                                             ? QString()
+                                             : QStringLiteral(" · ") + panel.summary);
+                results[i].audit = panel;
                 return {};
             });
     } else {
@@ -840,11 +936,16 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
         if (total > 0) {
             ev.onLog(QStringLiteral("token report — %1 tokens this run:").arg(total));
             for (const QString& l : lines) ev.onLog(l);
-            ev.onLog(QStringLiteral("  %1%% ran on free local models%2")
-                         .arg(local * 100 / total)
-                         .arg(doRoute ? QStringLiteral(" — routing kept the cheap work off the "
-                                                          "paid models")
-                                         : QString()));
+            // Only claim the win when there IS one: with every tier routed to a
+            // cloud model, local share is 0 and boasting that routing "kept the
+            // cheap work off the paid models" is precisely backwards.
+            const qint64 pct = local * 100 / total;
+            ev.onLog(QStringLiteral("  %1% ran on free local models%2")
+                         .arg(pct)
+                         .arg(doRoute && pct > 0
+                                  ? QStringLiteral(" — routing kept the cheap work off the "
+                                                   "paid models")
+                                  : QString()));
         }
     }
 

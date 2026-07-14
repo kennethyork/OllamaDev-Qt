@@ -1455,7 +1455,12 @@ QStringList CrewPacks::keys() {
             QStringLiteral("researcherBackend"), QStringLiteral("max"),
             QStringLiteral("amplify"),         QStringLiteral("land"),
             QStringLiteral("research"),        QStringLiteral("audit"),
-            QStringLiteral("skills"),          QStringLiteral("hosts")};
+            QStringLiteral("skills"),          QStringLiteral("hosts"),
+            // The brain belongs to the team: a pack that routes and debates is one
+            // you stop having to retype. Anything NOT in this list is dropped on
+            // save — every key here must also be read back by `crew --pack`.
+            QStringLiteral("route"),           QStringLiteral("debate"),
+            QStringLiteral("dedupe")};
 }
 
 QJsonObject CrewPacks::builtins() {

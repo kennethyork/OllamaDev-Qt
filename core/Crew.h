@@ -91,6 +91,16 @@ struct CrewOptions {
     // Off by default — the plain crew neither reads nor writes this.
     bool learn = false;
 
+    // Self-consistency. 1 = one shot, exactly as before. With N > 1 the Director
+    // draws N INDEPENDENT plans and keeps the one whose subtask count is the mode
+    // — a weak model's planning variance averages out instead of deciding the run
+    // — and the Auditor becomes an N-reviewer panel (alternating neutral and
+    // skeptic) that only calls a changeset clean on a STRICT majority.
+    //
+    // It costs what it says: N× the Director's calls and N× each audit. The coders
+    // are untouched, so the extra spend is on thinking, not on typing.
+    int amplify = 1;
+
     // Resume an interrupted run: keep coders that already finished (landed from
     // disk, or held on the board) untouched and finish the rest. Empty = a fresh
     // run. When set, the plan on disk — not the other fields here — is the source
