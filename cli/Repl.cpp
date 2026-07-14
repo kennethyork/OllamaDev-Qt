@@ -1152,6 +1152,23 @@ int Repl::run() {
         return a == QLatin1String("y") || a == QLatin1String("yes");
     });
 
+    // ask_user's channel to the human. Numbered options can be answered by number;
+    // anything else is taken verbatim, so the model can be told something it never
+    // thought to offer as a choice.
+    Tools::setQuestionAsker([this](const QString& question, const QStringList& options) {
+        emitRaw(QLatin1Char('\n') + cyan(QStringLiteral("  ? ")) + question + QLatin1Char('\n'));
+        for (int i = 0; i < options.size(); ++i)
+            emitRaw(dim(QStringLiteral("    %1) ").arg(i + 1)) + options.at(i) + QLatin1Char('\n'));
+        emitRaw(dim(QStringLiteral("  > ")));
+        const auto line = readRawLine();
+        if (!line) return QString();
+        const QString a = line->trimmed();
+        bool isNum = false;
+        const int pick = a.toInt(&isNum);
+        if (isNum && pick >= 1 && pick <= options.size()) return options.at(pick - 1);
+        return a;
+    });
+
     Permission::setPlanApprover([this](const QString& plan) {
         emitRaw(QLatin1Char('\n') + cyan(QStringLiteral("  📋 proposed plan")) + QLatin1Char('\n') +
                 (Render::enabled() ? Render::markdown(plan) : plan) + QLatin1Char('\n'));

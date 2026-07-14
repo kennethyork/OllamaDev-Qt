@@ -1,6 +1,7 @@
 #include "Tools.h"
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -14,11 +15,18 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QTemporaryFile>
+#include <QThread>
 #include <QVector>
 #include <atomic>
+#include <cmath>
+
+#ifndef Q_OS_WIN
+#include <csignal>
+#endif
 
 #include "CodeIndex.h"
 #include "Config.h"
+#include "GitFlow.h"
 #include "Hooks.h"
 #include "Mcp.h"
 #include "Memory.h"
@@ -404,6 +412,32 @@ QString Tools::threadRoot() {
 }
 
 bool Tools::hasThreadRoot() { return !g_threadRoot.isEmpty(); }
+
+namespace {
+QMutex g_askerMutex;
+std::function<QString(const QString&, const QStringList&)> g_asker;
+}  // namespace
+
+void Tools::setQuestionAsker(std::function<QString(const QString&, const QStringList&)> fn) {
+    QMutexLocker lock(&g_askerMutex);
+    g_asker = std::move(fn);
+}
+
+QString Tools::askQuestion(const QString& question, const QStringList& options, bool* asked) {
+    if (asked) *asked = false;
+    // No asker (a headless run), or a run with nobody watching (a crew coder on a
+    // worker thread): there is no human to answer, so we do NOT block. The caller
+    // turns this into "proceed on a stated assumption".
+    if (!Permission::interactive()) return {};
+    std::function<QString(const QString&, const QStringList&)> fn;
+    {
+        QMutexLocker lock(&g_askerMutex);
+        fn = g_asker;
+    }
+    if (!fn) return {};
+    if (asked) *asked = true;
+    return fn(question, options);
+}
 
 QString Tools::resolvePath(const QString& p, bool* ok) {
     if (ok) *ok = true;
@@ -1300,6 +1334,497 @@ ToolResult toolRunTests(const QJsonObject&) {
                          lines.join(QLatin1Char('\n'))));
 }
 
+// ====================================================================== git
+//
+// Every git_* tool goes through GitFlow::git, which spawns git with an argv ARRAY
+// inside Tools::threadRoot(), with a hard timeout, and hands back a real exit
+// code. That is not incidental — it is the whole reason these are safe to give a
+// model:
+//   * argv, not a shell string, so a branch name or a ref can never BE syntax
+//     (the PHP `git log` interpolated its `n` straight into a shell command);
+//   * threadRoot, so a crew coder running `git checkout` cannot reach out of its
+//     sandbox and move HEAD in your real repo;
+//   * a real exit code, so a merge conflict reports as a FAILURE instead of
+//     coming back looking like success with the conflict text as its "output".
+
+ToolResult gitRun(const QStringList& args, const QString& stdinText = QString()) {
+    if (!GitFlow::isRepo()) return fail(QStringLiteral("not a git repository"));
+    const GitResult r = GitFlow::git(args, stdinText);
+    const QString text = r.output.trimmed();
+    if (!r.ok())
+        return fail(text.isEmpty()
+                        ? QStringLiteral("git %1 failed (exit %2)").arg(args.value(0)).arg(r.exit)
+                        : text);
+    return okay(text.isEmpty() ? QStringLiteral("(no output)") : text);
+}
+
+ToolResult toolGitStatus(const QJsonObject&) {
+    return gitRun({QStringLiteral("status"), QStringLiteral("--short")});
+}
+
+ToolResult toolGitDiff(const QJsonObject& a) {
+    QStringList args{QStringLiteral("--no-pager"), QStringLiteral("diff")};
+    if (argBool(a, {"cached", "staged"})) args << QStringLiteral("--cached");
+    const QString file = argStr(a, {"file", "path", "file_path"});
+    // `--` first: a file named like a flag, or a ref and a path that share a name,
+    // are both real and both resolve wrong without it.
+    if (!file.isEmpty()) args << QStringLiteral("--") << file;
+    return gitRun(args);
+}
+
+ToolResult toolGitLog(const QJsonObject& a) {
+    const int n = qBound(1, argInt(a, {"n", "count", "limit"}, 10), 500);
+    return gitRun({QStringLiteral("--no-pager"), QStringLiteral("log"), QStringLiteral("--oneline"),
+                   QStringLiteral("-n"), QString::number(n)});
+}
+
+ToolResult toolGitBranch(const QJsonObject& a) {
+    QStringList args{QStringLiteral("branch")};
+    if (argBool(a, {"all"})) args << QStringLiteral("-a");
+    return gitRun(args);
+}
+
+ToolResult toolGitShow(const QJsonObject& a) {
+    QStringList args{QStringLiteral("--no-pager"), QStringLiteral("show")};
+    if (argBool(a, {"stat"})) args << QStringLiteral("--stat");
+    args << argStr(a, {"ref", "commit", "sha"}, QStringLiteral("HEAD"));
+    return gitRun(args);
+}
+
+ToolResult toolGitRemote(const QJsonObject&) {
+    return gitRun({QStringLiteral("remote"), QStringLiteral("-v")});
+}
+
+ToolResult toolGitFetch(const QJsonObject& a) {
+    QStringList args{QStringLiteral("fetch")};
+    if (argBool(a, {"all"})) args << QStringLiteral("--all");
+    if (argBool(a, {"prune"})) args << QStringLiteral("--prune");
+    return gitRun(args);
+}
+
+ToolResult toolGitCheckout(const QJsonObject& a) {
+    const QString branch = argStr(a, {"branch", "name", "ref"});
+    if (branch.isEmpty()) return fail(QStringLiteral("missing branch"));
+    QStringList args{QStringLiteral("checkout")};
+    if (argBool(a, {"new", "create", "b"})) args << QStringLiteral("-b");
+    args << branch;
+    return gitRun(args);
+}
+
+ToolResult toolGitAdd(const QJsonObject& a) {
+    if (argBool(a, {"all"})) return gitRun({QStringLiteral("add"), QStringLiteral("-A")});
+    QStringList args{QStringLiteral("add"), QStringLiteral("--")};
+    const QJsonValue files = a.value(QLatin1String("files"));
+    if (files.isArray()) {
+        for (const auto& f : files.toArray())
+            if (!f.toString().isEmpty()) args << f.toString();
+    } else {
+        args << argStr(a, {"files", "file", "path"}, QStringLiteral("."));
+    }
+    return gitRun(args);
+}
+
+ToolResult toolGitCommit(const QJsonObject& a) {
+    const QString msg = argStr(a, {"message", "m", "msg"});
+    if (msg.isEmpty()) return fail(QStringLiteral("missing commit message"));
+    QStringList args{QStringLiteral("commit")};
+    if (argBool(a, {"all", "a"})) args << QStringLiteral("-a");
+    if (argBool(a, {"amend"})) args << QStringLiteral("--amend");
+    // The message goes in over STDIN, not argv: a real commit message is
+    // multi-line, and this one was written by a model reading a diff that may
+    // itself have come from a repo you merely cloned.
+    args << QStringLiteral("-F") << QStringLiteral("-");
+    return gitRun(args, msg);
+}
+
+ToolResult toolGitMerge(const QJsonObject& a) {
+    const QString branch = argStr(a, {"branch", "name", "ref"});
+    if (branch.isEmpty()) return fail(QStringLiteral("missing branch"));
+    QStringList args{QStringLiteral("merge")};
+    if (argBool(a, {"no_ff", "noFf"})) args << QStringLiteral("--no-ff");
+    if (argBool(a, {"squash"})) args << QStringLiteral("--squash");
+    args << branch;
+    return gitRun(args);
+}
+
+ToolResult toolGitRebase(const QJsonObject& a) {
+    const QString branch = argStr(a, {"branch", "onto_branch", "upstream"});
+    if (branch.isEmpty()) return fail(QStringLiteral("missing branch"));
+    QStringList args{QStringLiteral("rebase")};
+    const QString onto = argStr(a, {"onto"});
+    if (!onto.isEmpty()) args << QStringLiteral("--onto") << onto;
+    args << branch;
+    return gitRun(args);
+}
+
+ToolResult toolGitStash(const QJsonObject& a) {
+    if (argBool(a, {"list"})) return gitRun({QStringLiteral("stash"), QStringLiteral("list")});
+    if (argBool(a, {"pop"})) return gitRun({QStringLiteral("stash"), QStringLiteral("pop")});
+    if (argBool(a, {"drop"})) return gitRun({QStringLiteral("stash"), QStringLiteral("drop")});
+    return gitRun({QStringLiteral("stash")});
+}
+
+ToolResult toolGitPull(const QJsonObject& a) {
+    QStringList args{QStringLiteral("pull")};
+    if (argBool(a, {"rebase"})) args << QStringLiteral("--rebase");
+    return gitRun(args);
+}
+
+ToolResult toolGitPush(const QJsonObject& a) {
+    // A crew coder works inside a throwaway folder-copy of the project — .git and
+    // all. A push from there would send unreviewed, un-landed sandbox work straight
+    // to your real remote, and it is the one git action that cannot be taken back.
+    // Land the changeset through the board first, then push from the project.
+    if (Tools::hasThreadRoot())
+        return fail(QStringLiteral(
+            "refusing to push from a crew sandbox — let the run land the changeset, then push "
+            "from the project itself"));
+    QStringList args{QStringLiteral("push")};
+    // --force-with-lease, never a bare --force: it still lets the model rewrite a
+    // branch it owns, but it refuses when the remote moved under it, which is the
+    // exact case where a plain --force destroys someone else's commits.
+    if (argBool(a, {"force"})) args << QStringLiteral("--force-with-lease");
+    if (argBool(a, {"upstream", "set_upstream", "u"})) args << QStringLiteral("-u");
+    return gitRun(args);
+}
+
+ToolResult toolGitClone(const QJsonObject& a) {
+    const QString url = argStr(a, {"url", "repo", "remote"});
+    if (url.isEmpty()) return fail(QStringLiteral("missing url"));
+    QStringList args{QStringLiteral("clone"), url};
+    const QString dir = argStr(a, {"dir", "path", "dest"});
+    if (!dir.isEmpty()) {
+        bool ok = false;
+        const QString target = Tools::resolvePath(dir, &ok);
+        if (!ok) return fail(QStringLiteral("path escapes the sandbox: %1").arg(dir));
+        args << target;
+    }
+    // No isRepo() gate here — cloning is how a repo comes to exist.
+    const GitResult r = GitFlow::git(args);
+    const QString text = r.output.trimmed();
+    if (!r.ok())
+        return fail(text.isEmpty() ? QStringLiteral("git clone failed (exit %1)").arg(r.exit)
+                                   : text);
+    return okay(text.isEmpty() ? QStringLiteral("cloned") : text);
+}
+
+ToolResult toolGitRevert(const QJsonObject& a) {
+    const QString ref = argStr(a, {"ref", "commit", "sha"});
+    if (ref.isEmpty()) return fail(QStringLiteral("missing ref (a commit hash or a branch)"));
+    QStringList args{QStringLiteral("revert")};
+    if (argBool(a, {"no_commit", "noCommit"})) args << QStringLiteral("--no-commit");
+    args << ref;
+    return gitRun(args);
+}
+
+ToolResult toolGitCherryPick(const QJsonObject& a) {
+    const QString ref = argStr(a, {"ref", "commit", "sha"});
+    if (ref.isEmpty()) return fail(QStringLiteral("missing ref (a commit hash or a branch)"));
+    QStringList args{QStringLiteral("cherry-pick")};
+    if (argBool(a, {"no_commit", "noCommit"})) args << QStringLiteral("--no-commit");
+    args << ref;
+    return gitRun(args);
+}
+
+// ======================================================== background shells
+//
+// A long job — a build, a test suite, a dev server — must not wedge the agent for
+// its whole duration. `bg` starts it and returns at once; the model reads it with
+// `bash_output`, blocks on it with `wait_bg`, and stops it with `kill_bash`.
+//
+// State is three files per job, so it survives the agent restarting:
+//   <id>.log   merged stdout+stderr
+//   <id>.pid   the child's pid
+//   <id>.off   how many bytes of the log the model has already been shown
+
+QString bgDir() {
+    const QString d = QDir::tempPath() + QStringLiteral("/ollamadev-bg");
+    QDir().mkpath(d);
+    return d;
+}
+
+bool bgAlive(qint64 pid) {
+    if (pid <= 0) return false;
+#ifdef Q_OS_WIN
+    return false;
+#else
+    // Signal 0: asks the kernel "could I signal this pid?" without sending anything.
+    return ::kill(static_cast<pid_t>(pid), 0) == 0;
+#endif
+}
+
+QString bgRead(const QString& path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    return QString::fromUtf8(f.readAll());
+}
+
+void bgWrite(const QString& path, const QString& text) {
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(text.toUtf8());
+}
+
+// The id is derived from the caller's own arguments, never from anything a job id
+// could smuggle in: basename() strips any path so `bash_output("../../etc/passwd")`
+// reads a file in the bg dir or nothing at all.
+QString bgJobId(const QJsonObject& a) {
+    return QFileInfo(argStr(a, {"bg_id", "id", "job"})).fileName();
+}
+
+ToolResult toolBg(const QJsonObject& a) {
+    QString cmd = argStr(a, {"command", "cmd"}).trimmed();
+    while (cmd.endsWith(QLatin1Char('&'))) cmd.chop(1);  // it is already backgrounded
+    cmd = cmd.trimmed();
+    if (cmd.isEmpty()) return fail(QStringLiteral("missing command"));
+
+    const QString id =
+        QStringLiteral("bg_") +
+        QString::fromLatin1(
+            QCryptographicHash::hash((cmd + QString::number(QDateTime::currentMSecsSinceEpoch()))
+                                         .toUtf8(),
+                                     QCryptographicHash::Sha1)
+                .toHex()
+                .left(6));
+    const QString log = bgDir() + QStringLiteral("/") + id + QStringLiteral(".log");
+    // Create the log BEFORE the job starts. startDetached() returns as soon as the
+    // shell is forked, which is before that shell has opened the redirect — so a
+    // bash_output or wait_bg called immediately (the normal thing to do!) would
+    // look for a log that does not exist yet and report "no such background job"
+    // for a job that is running perfectly well.
+    bgWrite(log, QString());
+
+    QProcess p;
+#ifdef Q_OS_WIN
+    p.setProgram(QStringLiteral("cmd"));
+    p.setArguments({QStringLiteral("/C"), cmd + QStringLiteral(" > \"") + log +
+                                              QStringLiteral("\" 2>&1")});
+#else
+    // The log path is ours (temp dir + a hex id), but single-quote it anyway: a
+    // temp dir with a space in it would otherwise silently split the redirect.
+    p.setProgram(QStringLiteral("/bin/sh"));
+    p.setArguments({QStringLiteral("-c"), QStringLiteral("(%1) > '%2' 2>&1").arg(cmd, log)});
+#endif
+    // The job inherits the CALLER's root: a crew coder's background build must run
+    // in that coder's sandbox, not in the user's project.
+    p.setWorkingDirectory(Tools::threadRoot());
+
+    qint64 pid = 0;
+    if (!p.startDetached(&pid))
+        return fail(QStringLiteral("could not start the background job"));
+    // We have the pid synchronously, so — unlike the PHP original, which slept 60ms
+    // and hoped the shell had written it — there is no window where the job is
+    // running but unknown, and no way for wait_bg to call it "finished" at 0s.
+    bgWrite(bgDir() + QStringLiteral("/") + id + QStringLiteral(".pid"), QString::number(pid));
+
+    return okay(QStringLiteral("started background job %1 (pid %2)\n"
+                               "  read it:  bash_output(bg_id=\"%1\")\n"
+                               "  wait:     wait_bg(bg_id=\"%1\")\n"
+                               "  stop it:  kill_bash(bg_id=\"%1\")\n"
+                               "  command:  %3")
+                    .arg(id)
+                    .arg(pid)
+                    .arg(cmd));
+}
+
+ToolResult toolBashOutput(const QJsonObject& a) {
+    const QString id = bgJobId(a);
+    const QString base = bgDir() + QStringLiteral("/") + id;
+    if (id.isEmpty() || !QFileInfo(base + QStringLiteral(".log")).isFile())
+        return fail(QStringLiteral("no such background job: %1").arg(id.isEmpty() ? QStringLiteral("(none)") : id));
+
+    const QString content = bgRead(base + QStringLiteral(".log"));
+    // A cursor on disk, so each call shows only what is NEW. If the log shrank
+    // (something truncated or rotated it) the cursor is meaningless — start over
+    // rather than slicing past the end.
+    int off = bgRead(base + QStringLiteral(".off")).toInt();
+    if (off < 0 || off > content.size()) off = 0;
+    const QString fresh = content.mid(off);
+    bgWrite(base + QStringLiteral(".off"), QString::number(content.size()));
+
+    const qint64 pid = bgRead(base + QStringLiteral(".pid")).trimmed().toLongLong();
+    const QString state = bgAlive(pid) ? QStringLiteral("running") : QStringLiteral("finished");
+    return okay(QStringLiteral("%1\n[%2 — %3]")
+                    .arg(fresh.isEmpty() ? QStringLiteral("(no new output)") : fresh, id, state));
+}
+
+ToolResult toolKillBash(const QJsonObject& a) {
+    const QString id = bgJobId(a);
+    const QString base = bgDir() + QStringLiteral("/") + id;
+    if (id.isEmpty() || !QFileInfo(base + QStringLiteral(".log")).isFile())
+        return fail(QStringLiteral("no such background job: %1").arg(id.isEmpty() ? QStringLiteral("(none)") : id));
+
+    const qint64 pid = bgRead(base + QStringLiteral(".pid")).trimmed().toLongLong();
+    if (pid <= 0) return fail(QStringLiteral("no pid recorded for %1").arg(id));
+    if (!bgAlive(pid)) return okay(QStringLiteral("background job %1 had already finished").arg(id));
+#ifndef Q_OS_WIN
+    // OUR OWN CHILD, by the pid we recorded when we started it. Never a kill by
+    // name — no pkill, no killall: this process does not get to decide that every
+    // `node` on the machine belongs to it.
+    ::kill(static_cast<pid_t>(pid), SIGTERM);
+#endif
+    return okay(QStringLiteral("stopped background job %1 (pid %2)").arg(id).arg(pid));
+}
+
+ToolResult toolWaitBg(const QJsonObject& a) {
+    const int secs = qBound(1, argInt(a, {"seconds", "timeout", "max"}, 60), 600);
+    const QString id = bgJobId(a);
+    if (id.isEmpty()) return fail(QStringLiteral("missing bg_id"));
+
+    const QString base = bgDir() + QStringLiteral("/") + id;
+    if (!QFileInfo(base + QStringLiteral(".log")).isFile())
+        return fail(QStringLiteral("no such background job: %1").arg(id));
+    const qint64 pid = bgRead(base + QStringLiteral(".pid")).trimmed().toLongLong();
+    if (pid <= 0) return fail(QStringLiteral("no pid recorded for %1").arg(id));
+
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < qint64(secs) * 1000) {
+        if (!bgAlive(pid))
+            return okay(QStringLiteral("background job %1 finished after %2s — read it with "
+                                       "bash_output(bg_id=\"%1\")")
+                            .arg(id)
+                            .arg(clock.elapsed() / 1000));
+        QThread::msleep(200);
+    }
+    return okay(QStringLiteral("background job %1 is still running after %2s").arg(id).arg(secs));
+}
+
+// ===================================================================== calc
+//
+// A real recursive-descent parser over + - * / % ^ ( ) and unary minus. The PHP
+// original filtered the string and handed it to eval(), which fataled the whole
+// process on `1/0` and on any malformed input — a model typo could kill the run.
+// Nothing here can do worse than return "invalid expression".
+
+struct Calc {
+    QString s;
+    int i = 0;
+    bool bad = false;
+    bool divZero = false;
+
+    void skip() {
+        while (i < s.size() && s.at(i).isSpace()) ++i;
+    }
+    bool eat(QChar c) {
+        skip();
+        if (i < s.size() && s.at(i) == c) {
+            ++i;
+            return true;
+        }
+        return false;
+    }
+    double expr() {  // + -
+        double v = term();
+        for (;;) {
+            if (eat(QLatin1Char('+')))
+                v += term();
+            else if (eat(QLatin1Char('-')))
+                v -= term();
+            else
+                return v;
+        }
+    }
+    double term() {  // * / %
+        double v = power();
+        for (;;) {
+            if (eat(QLatin1Char('*'))) {
+                v *= power();
+            } else if (eat(QLatin1Char('/'))) {
+                const double d = power();
+                if (d == 0.0) {
+                    divZero = true;
+                    return 0.0;
+                }
+                v /= d;
+            } else if (eat(QLatin1Char('%'))) {
+                const double d = power();
+                if (d == 0.0) {
+                    divZero = true;
+                    return 0.0;
+                }
+                v = std::fmod(v, d);
+            } else {
+                return v;
+            }
+        }
+    }
+    double power() {  // ^, right-associative
+        const double b = unary();
+        if (eat(QLatin1Char('^'))) return std::pow(b, power());
+        return b;
+    }
+    double unary() {
+        if (eat(QLatin1Char('-'))) return -unary();
+        if (eat(QLatin1Char('+'))) return unary();
+        return atom();
+    }
+    double atom() {
+        skip();
+        if (eat(QLatin1Char('('))) {
+            const double v = expr();
+            if (!eat(QLatin1Char(')'))) bad = true;
+            return v;
+        }
+        const int start = i;
+        while (i < s.size() && (s.at(i).isDigit() || s.at(i) == QLatin1Char('.'))) ++i;
+        if (i == start) {
+            bad = true;
+            return 0.0;
+        }
+        bool ok = false;
+        const double v = s.mid(start, i - start).toDouble(&ok);
+        if (!ok) bad = true;
+        return v;
+    }
+};
+
+ToolResult toolCalc(const QJsonObject& a) {
+    const QString expr =
+        argStr(a, {"expr", "expression", "calculation", "equation", "value"}).trimmed();
+    if (expr.isEmpty()) return fail(QStringLiteral("missing expression"));
+
+    Calc c;
+    c.s = expr;
+    const double v = c.expr();
+    c.skip();
+    if (c.divZero) return fail(QStringLiteral("division by zero"));
+    if (c.bad || c.i != c.s.size())
+        return fail(QStringLiteral("invalid expression: %1").arg(expr));
+    if (!std::isfinite(v)) return fail(QStringLiteral("result is not a finite number"));
+
+    // An integer result should read as one: "4", not "4.0000000000".
+    if (qFuzzyCompare(v, std::floor(v)) && std::fabs(v) < 1e15)
+        return okay(QString::number(static_cast<qint64>(v)));
+    return okay(QString::number(v, 'g', 12));
+}
+
+// ================================================================= ask_user
+
+ToolResult toolAskUser(const QJsonObject& a) {
+    const QString q = argStr(a, {"question", "prompt", "text"}).trimmed();
+    if (q.isEmpty()) return fail(QStringLiteral("missing question"));
+
+    QStringList options;
+    const QJsonValue ov = a.value(QLatin1String("options"));
+    if (ov.isArray()) {
+        for (const auto& o : ov.toArray())
+            if (!o.toString().trimmed().isEmpty()) options << o.toString().trimmed();
+    } else {
+        const QString s = argStr(a, {"options", "choices"});
+        for (const QString& o : s.split(QLatin1Char(','), Qt::SkipEmptyParts))
+            if (!o.trimmed().isEmpty()) options << o.trimmed();
+    }
+
+    bool asked = false;
+    const QString answer = Tools::askQuestion(q, options, &asked);
+    if (!asked)
+        return okay(QStringLiteral(
+            "Nobody can answer right now (this run is not interactive). Proceed with the most "
+            "reasonable default and state the assumption you made."));
+    return okay(answer.isEmpty() ? QStringLiteral("the user did not answer")
+                                 : QStringLiteral("the user answered: %1").arg(answer));
+}
+
 }  // namespace
 
 void Tools::registerAll() {
@@ -1420,6 +1945,191 @@ void Tools::registerAll() {
                                                     "\"pending|in_progress|completed\",\"activeForm\":\"..\"}]"))}},
                           {QStringLiteral("todos")}),
                    false, toolTodoWrite});
+
+    // ---- git ----------------------------------------------------------------
+    // The read-only six are mutates=false, so they never prompt and stay usable in
+    // plan/readonly mode — reading history is how a model decides what to do.
+    // Everything below them moves HEAD, the index, or a remote.
+    add(r, ToolDef{QStringLiteral("git_status"),
+                   QStringLiteral("Show the working tree status (short format)."),
+                   params(QJsonObject{}, {}), false, toolGitStatus});
+
+    add(r, ToolDef{QStringLiteral("git_diff"),
+                   QStringLiteral("Show unstaged changes, or staged ones with cached=true."),
+                   params(QJsonObject{{"file", strProp(QStringLiteral("Limit the diff to one path"))},
+                                      {"cached", boolProp(QStringLiteral(
+                                                     "Diff the STAGED changes instead"))}},
+                          {}),
+                   false, toolGitDiff});
+
+    add(r, ToolDef{QStringLiteral("git_log"),
+                   QStringLiteral("Show recent commits, one line each."),
+                   params(QJsonObject{{"n", intProp(QStringLiteral("How many commits (default 10)"))}},
+                          {}),
+                   false, toolGitLog});
+
+    add(r, ToolDef{QStringLiteral("git_branch"), QStringLiteral("List branches."),
+                   params(QJsonObject{{"all", boolProp(QStringLiteral("Include remote branches"))}},
+                          {}),
+                   false, toolGitBranch});
+
+    add(r, ToolDef{QStringLiteral("git_show"),
+                   QStringLiteral("Show a commit: its message and its diff."),
+                   params(QJsonObject{{"ref", strProp(QStringLiteral(
+                                                  "Commit hash, tag or branch (default HEAD)"))},
+                                      {"stat", boolProp(QStringLiteral(
+                                                   "Only the file summary, not the full diff"))}},
+                          {}),
+                   false, toolGitShow});
+
+    add(r, ToolDef{QStringLiteral("git_remote"), QStringLiteral("List the configured remotes."),
+                   params(QJsonObject{}, {}), false, toolGitRemote});
+
+    add(r, ToolDef{QStringLiteral("git_fetch"),
+                   QStringLiteral("Fetch from a remote without merging anything."),
+                   params(QJsonObject{{"all", boolProp(QStringLiteral("Fetch every remote"))},
+                                      {"prune", boolProp(QStringLiteral(
+                                                    "Drop refs whose remote branch is gone"))}},
+                          {}),
+                   true, toolGitFetch});
+
+    add(r, ToolDef{QStringLiteral("git_add"),
+                   QStringLiteral("Stage changes for the next commit."),
+                   params(QJsonObject{{"files", strProp(QStringLiteral(
+                                                    "Path(s) to stage (default: everything here)"))},
+                                      {"all", boolProp(QStringLiteral(
+                                                  "Stage every change in the repo"))}},
+                          {}),
+                   true, toolGitAdd});
+
+    add(r, ToolDef{QStringLiteral("git_commit"),
+                   QStringLiteral("Commit the staged changes. Write a real message: what changed "
+                                  "and why, not just the file names."),
+                   params(QJsonObject{{"message", strProp(QStringLiteral("The commit message"))},
+                                      {"all", boolProp(QStringLiteral(
+                                                  "Stage every tracked change first (-a)"))},
+                                      {"amend", boolProp(QStringLiteral(
+                                                    "Replace the previous commit instead"))}},
+                          {QStringLiteral("message")}),
+                   true, toolGitCommit});
+
+    add(r, ToolDef{QStringLiteral("git_checkout"),
+                   QStringLiteral("Switch to a branch, or create one with new=true."),
+                   params(QJsonObject{{"branch", strProp(QStringLiteral("Branch name"))},
+                                      {"new", boolProp(QStringLiteral("Create the branch (-b)"))}},
+                          {QStringLiteral("branch")}),
+                   true, toolGitCheckout});
+
+    add(r, ToolDef{QStringLiteral("git_merge"), QStringLiteral("Merge a branch into the current one."),
+                   params(QJsonObject{{"branch", strProp(QStringLiteral("Branch to merge in"))},
+                                      {"no_ff", boolProp(QStringLiteral("Always make a merge commit"))},
+                                      {"squash", boolProp(QStringLiteral(
+                                                     "Collapse it into one staged change"))}},
+                          {QStringLiteral("branch")}),
+                   true, toolGitMerge});
+
+    add(r, ToolDef{QStringLiteral("git_rebase"), QStringLiteral("Rebase the current branch."),
+                   params(QJsonObject{{"branch", strProp(QStringLiteral("Rebase onto this branch"))},
+                                      {"onto", strProp(QStringLiteral("Explicit --onto target"))}},
+                          {QStringLiteral("branch")}),
+                   true, toolGitRebase});
+
+    add(r, ToolDef{QStringLiteral("git_stash"),
+                   QStringLiteral("Shelve the working changes; pop/list/drop them."),
+                   params(QJsonObject{{"pop", boolProp(QStringLiteral("Restore the newest stash"))},
+                                      {"list", boolProp(QStringLiteral("List the stashes"))},
+                                      {"drop", boolProp(QStringLiteral("Delete the newest stash"))}},
+                          {}),
+                   true, toolGitStash});
+
+    add(r, ToolDef{QStringLiteral("git_revert"),
+                   QStringLiteral("Undo a commit by making a new one that reverses it."),
+                   params(QJsonObject{{"ref", strProp(QStringLiteral("Commit to revert"))},
+                                      {"no_commit", boolProp(QStringLiteral(
+                                                        "Stage the reversal without committing"))}},
+                          {QStringLiteral("ref")}),
+                   true, toolGitRevert});
+
+    add(r, ToolDef{QStringLiteral("git_cherry_pick"),
+                   QStringLiteral("Apply one commit from elsewhere onto this branch."),
+                   params(QJsonObject{{"ref", strProp(QStringLiteral("Commit to apply"))},
+                                      {"no_commit", boolProp(QStringLiteral(
+                                                        "Stage it without committing"))}},
+                          {QStringLiteral("ref")}),
+                   true, toolGitCherryPick});
+
+    add(r, ToolDef{QStringLiteral("git_pull"), QStringLiteral("Fetch and integrate the remote branch."),
+                   params(QJsonObject{{"rebase", boolProp(QStringLiteral("Rebase instead of merge"))}},
+                          {}),
+                   true, toolGitPull});
+
+    add(r, ToolDef{QStringLiteral("git_push"),
+                   QStringLiteral("Push commits to the remote. This LEAVES THE MACHINE and is the "
+                                  "one git action that cannot be undone — be sure first."),
+                   params(QJsonObject{{"upstream", boolProp(QStringLiteral(
+                                                       "Set the upstream for a new branch (-u)"))},
+                                      {"force", boolProp(QStringLiteral(
+                                                    "Force-push (refused if the remote moved)"))}},
+                          {}),
+                   true, toolGitPush});
+
+    add(r, ToolDef{QStringLiteral("git_clone"), QStringLiteral("Clone a repository."),
+                   params(QJsonObject{{"url", strProp(QStringLiteral("Repository URL"))},
+                                      {"dir", strProp(QStringLiteral("Directory to clone into"))}},
+                          {QStringLiteral("url")}),
+                   true, toolGitClone});
+
+    // ---- background shells ---------------------------------------------------
+    add(r, ToolDef{QStringLiteral("bg"),
+                   QStringLiteral("Start a long command in the background and return immediately. "
+                                  "Use this for builds, test suites and servers instead of bash, "
+                                  "which blocks until the command exits."),
+                   params(QJsonObject{{"command", strProp(QStringLiteral("The shell command to run"))}},
+                          {QStringLiteral("command")}),
+                   true, toolBg});
+
+    add(r, ToolDef{QStringLiteral("bash_output"),
+                   QStringLiteral("Read whatever a background job has printed SINCE THE LAST READ, "
+                                  "and whether it is still running."),
+                   params(QJsonObject{{"bg_id", strProp(QStringLiteral("The job id bg returned"))}},
+                          {QStringLiteral("bg_id")}),
+                   false, toolBashOutput});
+
+    add(r, ToolDef{QStringLiteral("wait_bg"),
+                   QStringLiteral("Block until a background job finishes, or until the timeout."),
+                   params(QJsonObject{{"bg_id", strProp(QStringLiteral("The job id bg returned"))},
+                                      {"seconds", intProp(QStringLiteral(
+                                                      "How long to wait (default 60, max 600)"))}},
+                          {QStringLiteral("bg_id")}),
+                   false, toolWaitBg});
+
+    add(r, ToolDef{QStringLiteral("kill_bash"), QStringLiteral("Stop a background job."),
+                   params(QJsonObject{{"bg_id", strProp(QStringLiteral("The job id bg returned"))}},
+                          {QStringLiteral("bg_id")}),
+                   true, toolKillBash});
+
+    // ---- calc ----------------------------------------------------------------
+    add(r, ToolDef{QStringLiteral("calc"),
+                   QStringLiteral("Evaluate an arithmetic expression exactly. Use it instead of "
+                                  "doing arithmetic in your head — you are bad at it."),
+                   params(QJsonObject{{"expr", strProp(QStringLiteral(
+                                                   "e.g. (1024 * 3) / 7 or 2^16"))}},
+                          {QStringLiteral("expr")}),
+                   false, toolCalc});
+
+    // ---- ask_user ------------------------------------------------------------
+    // mutates=false: asking a question changes nothing on disk, and a model in plan
+    // mode is exactly when a question is most useful. It cannot hang a headless run
+    // — with no asker installed it returns immediately (see toolAskUser).
+    add(r, ToolDef{QStringLiteral("ask_user"),
+                   QStringLiteral("Ask the human a question when the task is genuinely ambiguous "
+                                  "and the answer changes what you would do. Do NOT ask for things "
+                                  "you can find out yourself by reading the code."),
+                   params(QJsonObject{{"question", strProp(QStringLiteral("The question to ask"))},
+                                      {"options", arrProp(QStringLiteral(
+                                                      "Optional choices to offer, as strings"))}},
+                          {QStringLiteral("question")}),
+                   false, toolAskUser});
 
     // mutates=false on purpose: this is the ONE tool that must stay callable in
     // plan mode. It changes no files — it asks the user to approve the plan, and

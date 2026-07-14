@@ -101,6 +101,19 @@ public:
     // inherit — without accidentally turning the plain CLI's cwd into a jail.
     static bool hasThreadRoot();
 
+    // ask_user's channel to the human. The CLI installs a stdin prompt; a GUI can
+    // install a dialog. Returns the answer, or an empty string if the human
+    // declined to answer.
+    //
+    // Not installed, or a non-interactive run: there is NOBODY to ask (a crew coder
+    // runs on a worker thread with no terminal), so ask_user must not block — it
+    // tells the model to proceed on a stated assumption instead. A tool that can
+    // hang a whole run waiting for an answer that can never come is worse than no
+    // tool at all.
+    static void setQuestionAsker(
+        std::function<QString(const QString& question, const QStringList& options)> fn);
+    static QString askQuestion(const QString& question, const QStringList& options, bool* asked);
+
     // Resolve a possibly-relative tool argument against threadRoot().
     //
     // When a thread root has been set EXPLICITLY (i.e. we are a sandboxed crew

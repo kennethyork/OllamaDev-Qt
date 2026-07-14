@@ -6,6 +6,8 @@
 #include <QTextStream>
 #include <QThread>
 
+#include <QProcess>
+
 #include "Backend.h"
 #include "Config.h"
 #include "Json.h"
@@ -13,6 +15,7 @@
 #include "Parallel.h"
 #include "Sandbox.h"
 #include "SecScan.h"
+#include "Tools.h"
 
 using namespace odv;
 
@@ -305,6 +308,135 @@ static void testCrewAmplify() {
     }
 }
 
+// The agent tool suite, driven for real: a throwaway git repo, actual commits,
+// an actual background job. These are the tools a model reaches for most, so they
+// are tested by BEHAVIOUR, not by grepping the source.
+static void testAgentTools() {
+    Tools::registerAll();
+    Permission::setMode(PermMode::Auto);
+    Permission::setInteractive(false);
+
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        check(false, "temp dir for the tool tests");
+        return;
+    }
+    const QString root = tmp.path();
+
+    // A real repo, made with real git. If git is missing there is nothing to test.
+    auto git = [&](const QStringList& a) {
+        QProcess p;
+        p.setWorkingDirectory(root);
+        p.start(QStringLiteral("git"), a);
+        return p.waitForFinished(10000) && p.exitCode() == 0;
+    };
+    if (!git({QStringLiteral("init"), QStringLiteral("-q")})) {
+        check(true, "git is not installed — skipping the git tool tests");
+        return;
+    }
+    git({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@t.t")});
+    git({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("t")});
+
+    // Every tool resolves against the thread root, so this IS the sandbox boundary.
+    Tools::setThreadRoot(root);
+
+    QFile f(root + QStringLiteral("/hello.txt"));
+    f.open(QIODevice::WriteOnly);
+    f.write("hi\n");
+    f.close();
+
+    ToolResult r = Tools::run(QStringLiteral("git_status"), {});
+    check(r.ok && r.output.contains(QStringLiteral("hello.txt")), "git_status sees the new file");
+
+    r = Tools::run(QStringLiteral("git_add"), QJsonObject{{"all", true}});
+    check(r.ok, "git_add stages everything");
+
+    // A multi-line message goes over stdin, so a newline in it can never be argv.
+    r = Tools::run(QStringLiteral("git_commit"),
+                   QJsonObject{{"message", QStringLiteral("first: add hello\n\nwith a body")}});
+    check(r.ok, "git_commit commits the staged tree");
+
+    r = Tools::run(QStringLiteral("git_log"), QJsonObject{{"n", 5}});
+    check(r.ok && r.output.contains(QStringLiteral("first: add hello")), "git_log lists the commit");
+
+    // The PHP original interpolated `n` into a shell string unescaped. If that ever
+    // comes back, this injects a command that would create a file in the repo.
+    Tools::run(QStringLiteral("git_log"),
+               QJsonObject{{"n", QStringLiteral("5; touch pwned")}});
+    check(!QFileInfo(root + QStringLiteral("/pwned")).exists(),
+          "git_log cannot be used to inject a shell command");
+
+    r = Tools::run(QStringLiteral("git_branch"), {});
+    check(r.ok, "git_branch lists branches");
+
+    r = Tools::run(QStringLiteral("git_show"), QJsonObject{{"stat", true}});
+    check(r.ok && r.output.contains(QStringLiteral("hello.txt")), "git_show shows HEAD");
+
+    // A crew coder lives under an explicit thread root. Pushing from there would
+    // send un-landed sandbox work to the real remote, so it must refuse.
+    r = Tools::run(QStringLiteral("git_push"), {});
+    check(!r.ok && r.error.contains(QStringLiteral("sandbox")),
+          "git_push REFUSES to push out of a sandbox");
+
+    // A failing git command must come back as a FAILURE, not as success carrying
+    // the error text — that was the bug in every PHP git tool.
+    r = Tools::run(QStringLiteral("git_checkout"), QJsonObject{{"branch", QStringLiteral("nope")}});
+    check(!r.ok, "a failed git command reports failure, not success-with-error-text");
+
+    // ---- background shells ----
+    r = Tools::run(QStringLiteral("bg"),
+                   QJsonObject{{"command", QStringLiteral("echo alpha; sleep 1; echo omega")}});
+    check(r.ok && r.output.contains(QStringLiteral("bg_")), "bg starts a job and returns at once");
+    QString id;
+    for (const QString& w : r.output.split(QRegularExpression(QStringLiteral("[\\s(]")))) {
+        if (w.startsWith(QStringLiteral("bg_"))) {
+            id = w;
+            break;
+        }
+    }
+    check(!id.isEmpty(), "bg hands back a job id");
+
+    r = Tools::run(QStringLiteral("wait_bg"), QJsonObject{{"bg_id", id}, {"seconds", 20}});
+    check(r.ok && r.output.contains(QStringLiteral("finished")), "wait_bg blocks until the job ends");
+
+    r = Tools::run(QStringLiteral("bash_output"), QJsonObject{{"bg_id", id}});
+    check(r.ok && r.output.contains(QStringLiteral("alpha")) &&
+              r.output.contains(QStringLiteral("omega")),
+          "bash_output returns the job's output");
+    // The cursor: a second read shows only what is NEW, and the job is done, so
+    // that is nothing at all.
+    r = Tools::run(QStringLiteral("bash_output"), QJsonObject{{"bg_id", id}});
+    check(r.ok && r.output.contains(QStringLiteral("no new output")),
+          "bash_output only ever shows what you have not already seen");
+
+    r = Tools::run(QStringLiteral("bash_output"), QJsonObject{{"bg_id", QStringLiteral("../../etc/passwd")}});
+    check(!r.ok, "a job id cannot traverse out of the bg directory");
+
+    // ---- calc ----
+    r = Tools::run(QStringLiteral("calc"), QJsonObject{{"expr", QStringLiteral("2 + 3 * 4")}});
+    check(r.ok && r.output == QStringLiteral("14"), "calc respects precedence");
+    r = Tools::run(QStringLiteral("calc"), QJsonObject{{"expr", QStringLiteral("(1 + 2) ^ 3")}});
+    check(r.ok && r.output == QStringLiteral("27"), "calc does parens and powers");
+    r = Tools::run(QStringLiteral("calc"), QJsonObject{{"expr", QStringLiteral("-4 + 10")}});
+    check(r.ok && r.output == QStringLiteral("6"), "calc does unary minus");
+    // Both of these KILLED the PHP process: eval() raised a fatal Error that its
+    // catch(Exception) never saw.
+    r = Tools::run(QStringLiteral("calc"), QJsonObject{{"expr", QStringLiteral("1/0")}});
+    check(!r.ok && r.error.contains(QStringLiteral("zero")), "calc survives division by zero");
+    r = Tools::run(QStringLiteral("calc"), QJsonObject{{"expr", QStringLiteral("1 +")}});
+    check(!r.ok, "calc survives a malformed expression");
+
+    // ---- ask_user ----
+    // Non-interactive: there is nobody to answer, so it must return AT ONCE with a
+    // usable instruction rather than blocking the run forever.
+    r = Tools::run(QStringLiteral("ask_user"),
+                   QJsonObject{{"question", QStringLiteral("which one?")}});
+    check(r.ok && r.output.contains(QStringLiteral("not interactive")),
+          "ask_user never blocks a run that has nobody to ask");
+
+    Tools::setThreadRoot(QString());
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -319,6 +451,7 @@ int main(int argc, char** argv) {
     s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent(); testCliBackendIsSandboxed(); testPerBackendModelRouting();
     s << "crew-resume\n"; s.flush(); testCrewResume();
     s << "crew-amplify\n"; s.flush(); testCrewAmplify();
+    s << "agent-tools\n"; s.flush(); testAgentTools();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();
