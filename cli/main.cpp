@@ -900,7 +900,7 @@ int cmdVoice(const QStringList& args) {
         return 1;
     }
 
-    out() << "🎤 recording (" << Stt::modelSize() << ") — press Enter to stop…";
+    out() << "recording (" << Stt::modelSize() << ") — press Enter to stop…";
     out().flush();
     QTextStream in(stdin);
     in.readLine();
@@ -985,7 +985,7 @@ int cmdOneShot(const QString& prompt, const QStringList& args) {
     int attached = 0;
     user.content = Vision::attach(user, prompt, &attached);
     if (attached > 0) {
-        err() << "🖼 attached " << attached << " image(s)\n";
+        err() << "attached " << attached << " image(s)\n";
         err().flush();
     }
 
@@ -2440,7 +2440,7 @@ int cmdModelsPresets(bool jsonOut) {
     out() << "Recommended models (pull with: ollamadev pull <alias>)\n\n";
     out() << "  Local — run on your machine\n";
     for (const Preset& p : Models::presets()) printPresetRow(p, installed);
-    out() << "\n  ☁ Cloud — run on Ollama's servers (needs `ollama signin`); prompts leave "
+    out() << "\n  Cloud — run on Ollama's servers (needs `ollama signin`); prompts leave "
              "this machine\n";
     for (const Preset& p : Models::cloudPresets()) printPresetRow(p, installed);
     out().flush();
@@ -2457,7 +2457,7 @@ int cmdModelsCloud(bool jsonOut) {
         out().flush();
         return 0;
     }
-    out() << "☁ Ollama cloud models\n";
+    out() << "Ollama cloud models\n";
     out() << "Run on Ollama's servers, reached through your local daemon — still Ollama-only,\n"
              "but prompts leave this machine. Frontier-scale models without the local VRAM.\n\n";
     out() << "  1. sign in once:  ollama signin\n"

@@ -186,7 +186,7 @@ int Watch::run(const WatchOptions& opt) {
     QStringList names;
     for (const QString& r : roots) names << QFileInfo(r).fileName();
 
-    out() << "\n👁  OllamaDev Watch  " << dim(QStringLiteral("model %1 · %2 · %3 mode")
+    out() << "\n OllamaDev Watch  " << dim(QStringLiteral("model %1 · %2 · %3 mode")
                                                  .arg(model, names.join(QStringLiteral(", ")),
                                                       Permission::modeName(Permission::mode())))
           << "\n"

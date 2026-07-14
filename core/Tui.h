@@ -111,7 +111,7 @@ public:
 };
 
 // A bounded, collapsing "thinking box": streams a model's reasoning dimmed into
-// at most N rows, then replaces the whole thing with `💭 thought for 4s` the
+// at most N rows, then replaces the whole thing with ` thought for 4s` the
 // moment the answer starts.
 //
 // WHY BOUNDED. A terminal can only erase rows that are still on screen. Once

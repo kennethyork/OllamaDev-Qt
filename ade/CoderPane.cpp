@@ -27,13 +27,12 @@ namespace {
 // That is the whole trick: no extra IPC, no event bus — the file the crew was
 // already writing is the live feed.
 struct Activity {
-    QString icon;
     QString label;   // "editing", "running", …
     QString detail;  // the file / command / pattern
 };
 
 Activity readActivity(const QString& log) {
-    Activity a{QStringLiteral("💭"), QStringLiteral("thinking"), {}};
+    Activity a{QStringLiteral("thinking"), {}};
     if (log.isEmpty()) return a;
 
     // Last "→ tool detail" line wins.
@@ -50,30 +49,23 @@ Activity readActivity(const QString& log) {
 
     // Grouped by what the user cares about — "is it writing, or just reading?" —
     // not by tool name. A coder that has been reading for two minutes is a
-    // different situation from one that is editing, and the icon should say so.
-    static const QHash<QString, QPair<QString, QString>> kinds{
-        {QStringLiteral("edit"), {QStringLiteral("✏️"), QStringLiteral("editing")}},
-        {QStringLiteral("multi_edit"), {QStringLiteral("✏️"), QStringLiteral("editing")}},
-        {QStringLiteral("write"), {QStringLiteral("✏️"), QStringLiteral("writing")}},
-        {QStringLiteral("patch"), {QStringLiteral("✏️"), QStringLiteral("patching")}},
-        {QStringLiteral("view"), {QStringLiteral("👀"), QStringLiteral("reading")}},
-        {QStringLiteral("ls"), {QStringLiteral("👀"), QStringLiteral("looking around")}},
-        {QStringLiteral("grep"), {QStringLiteral("🔎"), QStringLiteral("searching")}},
-        {QStringLiteral("glob"), {QStringLiteral("🔎"), QStringLiteral("searching")}},
-        {QStringLiteral("code_search"), {QStringLiteral("🔎"), QStringLiteral("searching")}},
-        {QStringLiteral("bash"), {QStringLiteral("⚙️"), QStringLiteral("running")}},
-        {QStringLiteral("bg"), {QStringLiteral("⚙️"), QStringLiteral("running")}},
-        {QStringLiteral("run_tests"), {QStringLiteral("🧪"), QStringLiteral("testing")}},
-        {QStringLiteral("skill"), {QStringLiteral("📖"), QStringLiteral("loading a skill")}},
+    // different situation from one that is editing.
+    static const QHash<QString, QString> kinds{
+        {QStringLiteral("edit"), QStringLiteral("editing")},
+        {QStringLiteral("multi_edit"), QStringLiteral("editing")},
+        {QStringLiteral("write"), QStringLiteral("writing")},
+        {QStringLiteral("patch"), QStringLiteral("patching")},
+        {QStringLiteral("view"), QStringLiteral("reading")},
+        {QStringLiteral("ls"), QStringLiteral("looking around")},
+        {QStringLiteral("grep"), QStringLiteral("searching")},
+        {QStringLiteral("glob"), QStringLiteral("searching")},
+        {QStringLiteral("code_search"), QStringLiteral("searching")},
+        {QStringLiteral("bash"), QStringLiteral("running")},
+        {QStringLiteral("bg"), QStringLiteral("running")},
+        {QStringLiteral("run_tests"), QStringLiteral("testing")},
+        {QStringLiteral("skill"), QStringLiteral("loading a skill")},
     };
-    const auto it = kinds.constFind(tool);
-    if (it != kinds.constEnd()) {
-        a.icon = it->first;
-        a.label = it->second;
-    } else {
-        a.icon = QStringLiteral("🔧");
-        a.label = tool;
-    }
+    a.label = kinds.value(tool, tool);  // an unknown tool is described by its own name
     return a;
 }
 
@@ -141,7 +133,7 @@ public:
         const QString model = s.value(QStringLiteral("model")).toString();
         const QString route = s.value(QStringLiteral("route")).toString();
 
-        title_->setText(QStringLiteral("👷 #%1  %2").arg(n_).arg(
+        title_->setText(QStringLiteral("#%1  %2").arg(n_).arg(
             s.value(QStringLiteral("title")).toString()));
         title_->setStyleSheet(QStringLiteral("font-weight:600;color:%1")
                                   .arg(stateColor(state, c).name()));
@@ -149,7 +141,7 @@ public:
         const Activity a = readActivity(log_);
         // A finished coder is not "thinking" — its last logged action is history.
         const QString what = state == QLatin1String("doing")
-                                 ? QStringLiteral("%1 %2 %3").arg(a.icon, a.label, a.detail)
+                                 ? QStringLiteral("%1 %2").arg(a.label, a.detail)
                                  : QStringLiteral("· %1").arg(state);
         activity_->setText(
             QStringLiteral("%1\n%2%3").arg(what.trimmed(), model,
@@ -294,7 +286,7 @@ private:
 PaneSpec makeCoderPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("coders");
-    s.title = QStringLiteral("👷 Coders");
+    s.title = QStringLiteral("Coders");
     s.group = QStringLiteral("Crew");
     s.singleton = true;
     s.factory = [](PaneHost&) -> QWidget* { return new CoderPaneView; };

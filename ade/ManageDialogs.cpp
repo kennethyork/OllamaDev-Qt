@@ -341,7 +341,7 @@ void openCrewLaunch(PaneHost& host) {
     auto* audit = new QCheckBox(QObject::tr("Audit phase"));
     audit->setChecked(true);
     // The brain — all opt-in, exactly as on the CLI. Off = the plain crew.
-    auto* brain = new QCheckBox(QObject::tr("🧠 Use the brain — auto-pick a model per subtask by difficulty"));
+    auto* brain = new QCheckBox(QObject::tr("Use the brain — auto-pick a model per subtask by difficulty"));
     auto* debate = new QCheckBox(QObject::tr("Debate each change (advocate vs skeptic vs judge)"));
     auto* dedupe = new QCheckBox(QObject::tr("Dedupe — hold work that duplicates another coder's"));
     auto* learn = new QCheckBox(QObject::tr("Learn — remember what this run teaches for next time"));

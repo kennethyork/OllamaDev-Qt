@@ -53,9 +53,9 @@ public:
         if (auto be = Backends::get(backendId_)) model_->addItems(be->models());
         model_->setCurrentText(host.currentModel());
 
-        auto* attach = new QPushButton(QStringLiteral("📎"), this);
+        auto* attach = new QPushButton(tr("Image"), this);
         attach->setToolTip(tr("Attach an image (a vision model will see it)"));
-        attach->setFixedWidth(34);
+        attach->setFixedWidth(56);
 
         auto* clear = new QPushButton(tr("New"), this);
         clear->setToolTip(tr("Start a fresh conversation"));
@@ -178,7 +178,7 @@ private:
         session_.save();
 
         append(tr("You"),
-               images > 0 ? QStringLiteral("%1\n🖼 %2 image(s)").arg(user.content).arg(images)
+               images > 0 ? QStringLiteral("%1\n[%2 image(s)]").arg(user.content).arg(images)
                           : user.content,
                Theme::currentColors().accent);
         input_->clear();
@@ -259,7 +259,7 @@ private:
 PaneSpec makeChatPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("chat");
-    s.title = QStringLiteral("💬 Chat");
+    s.title = QStringLiteral("Chat");
     s.group = QStringLiteral("Views");
     // The FIRST non-singleton pane. Two chats side by side is the whole point: one
     // arguing about an approach, one reading a stack trace.

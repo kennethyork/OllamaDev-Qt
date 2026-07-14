@@ -247,7 +247,7 @@ private:
 PaneSpec makeBrowserPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("browser");
-    s.title = QStringLiteral("🌐 Browser");
+    s.title = QStringLiteral("Browser");
     s.group = QStringLiteral("Views");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new BrowserWidget(host); };

@@ -102,7 +102,7 @@ Onboard::Recommendation Onboard::recommend(const HwInfo& hw) {
 
 int Onboard::run(const std::function<bool(const QString&)>& confirm) {
     Config::load();
-    out() << QStringLiteral("\033[1;36m\n⚙  OllamaDev setup\033[0m\n");
+    out() << QStringLiteral("\033[1;36m\n OllamaDev setup\033[0m\n");
     out().flush();
 
     auto ollama = Backends::get(QStringLiteral("ollama"));

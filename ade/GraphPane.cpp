@@ -271,7 +271,7 @@ private:
 PaneSpec makeGraphPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("graph");
-    s.title = QStringLiteral("🕸 Memory graph");
+    s.title = QStringLiteral("Memory graph");
     s.group = QStringLiteral("Views");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new GraphPaneWidget(host); };

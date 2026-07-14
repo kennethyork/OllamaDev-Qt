@@ -32,13 +32,13 @@ public:
         root->addWidget(section(tr("Get set up")));
         auto* setup = new QGridLayout;
         setup->setSpacing(10);
-        addTile(setup, 0, 0, QStringLiteral("🩺"), tr("Doctor"),
+        addTile(setup, 0, 0, tr("Doctor"),
                 tr("Check Ollama, models, and CLIs are healthy"),
                 QStringLiteral("ollamadev doctor"));
-        addTile(setup, 0, 1, QStringLiteral("🧰"), tr("Setup"),
+        addTile(setup, 0, 1, tr("Setup"),
                 tr("First-run setup — pick models and providers"),
                 QStringLiteral("ollamadev setup"));
-        addTile(setup, 0, 2, QStringLiteral("✅"), tr("Verify"),
+        addTile(setup, 0, 2, tr("Verify"),
                 tr("Run the project's tests and auto-fix failures"),
                 QStringLiteral("ollamadev verify"));
         root->addLayout(setup);
@@ -46,21 +46,21 @@ public:
         root->addWidget(section(tr("Jump in")));
         auto* quick = new QGridLayout;
         quick->setSpacing(10);
-        addTile(quick, 0, 0, QStringLiteral("💬"), tr("Chat"),
+        addTile(quick, 0, 0, tr("Chat"),
                 tr("Interactive agent for this folder"), QStringLiteral("ollamadev"));
-        addTile(quick, 0, 1, QStringLiteral("👥"), tr("Crew"),
+        addTile(quick, 0, 1, tr("Crew"),
                 tr("Plan → parallel coders → audit → land"),
                 QStringLiteral("ollamadev crew"));
-        addTile(quick, 0, 2, QStringLiteral("🧠"), tr("Index"),
+        addTile(quick, 0, 2, tr("Index"),
                 tr("Build the semantic code index"),
                 QStringLiteral("ollamadev index build"));
-        addTile(quick, 1, 0, QStringLiteral("📦"), tr("Models"),
+        addTile(quick, 1, 0, tr("Models"),
                 tr("List models on the active backend"),
                 QStringLiteral("ollamadev models"));
-        addTile(quick, 1, 1, QStringLiteral("🕸"), tr("Memory"),
+        addTile(quick, 1, 1, tr("Memory"),
                 tr("List the wiki-linked notes"),
                 QStringLiteral("ollamadev memory list"));
-        addTile(quick, 1, 2, QStringLiteral("🚀"), tr("Ship"),
+        addTile(quick, 1, 2, tr("Ship"),
                 tr("Stage → scan → AI commit → push"),
                 QStringLiteral("ollamadev ship"));
         root->addLayout(quick);
@@ -82,11 +82,11 @@ private:
         return l;
     }
 
-    void addTile(QGridLayout* grid, int r, int cIdx, const QString& icon, const QString& title,
-                 const QString& desc, const QString& cmd) {
+    void addTile(QGridLayout* grid, int r, int cIdx, const QString& title, const QString& desc,
+                 const QString& cmd) {
         const Theme::Colors c = Theme::currentColors();
         auto* b = new QPushButton(this);
-        b->setText(QStringLiteral("%1  %2\n%3").arg(icon, title, desc));
+        b->setText(QStringLiteral("%1\n%2").arg(title, desc));
         b->setMinimumHeight(72);
         b->setCursor(Qt::PointingHandCursor);
         b->setStyleSheet(

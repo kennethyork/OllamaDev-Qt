@@ -67,7 +67,7 @@ public:
         root->addWidget(prompt_, 1);
 
         auto* bar = new QHBoxLayout;
-        auto* launch = new QPushButton(tr("🚀 Launch team"), this);
+        auto* launch = new QPushButton(tr("Launch team"), this);
         launch->setProperty("cta", true);
         status_ = new QLabel(this);
         status_->setStyleSheet(QStringLiteral("color:%1;").arg(Theme::currentColors().faint.name()));

@@ -1016,9 +1016,9 @@ ToolResult toolTodoWrite(const QJsonObject& a) {
     for (const QJsonValue& v : norm) {
         const QJsonObject t = v.toObject();
         const QString s = t.value(QStringLiteral("status")).toString();
-        const QString mark = s == QLatin1String("completed")   ? QStringLiteral("☑")
-                             : s == QLatin1String("in_progress") ? QStringLiteral("▣")
-                                                                 : QStringLiteral("☐");
+        const QString mark = s == QLatin1String("completed")     ? QStringLiteral("[x]")
+                             : s == QLatin1String("in_progress") ? QStringLiteral("[~]")
+                                                                 : QStringLiteral("[ ]");
         out += QStringLiteral("  %1 %2\n").arg(mark, t.value(QStringLiteral("content")).toString());
     }
     return okay(out.trimmed());

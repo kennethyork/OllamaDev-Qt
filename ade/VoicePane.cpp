@@ -48,7 +48,7 @@ public:
         root->setContentsMargins(10, 10, 10, 10);
         root->setSpacing(8);
 
-        ptt_ = new QPushButton(tr("🎙  Press to talk"), this);
+        ptt_ = new QPushButton(tr("Press to talk"), this);
         ptt_->setMinimumHeight(46);
         ptt_->setProperty("cta", true);
         root->addWidget(ptt_);
@@ -120,7 +120,7 @@ private:
 
     void stopAndTranscribe() {
         recording_ = false;
-        ptt_->setText(tr("🎙  Press to talk"));
+        ptt_->setText(tr("Press to talk"));
         const QString wav = rec_->stop();
         if (wav.isEmpty()) {
             note(tr("nothing captured"), true);
@@ -198,7 +198,7 @@ private:
         if (auto m = start.match(raw); m.hasMatch()) {
             const QString task = m.captured(1).trimmed();
             host_.runInTerminal(QStringLiteral("ollamadev crew %1").arg(shq(task)));
-            note(tr("🚀 launching a crew: %1").arg(task));
+            note(tr("launching a crew: %1").arg(task));
             host_.setStatus(tr("launching crew"));
             return true;
         }
@@ -208,8 +208,8 @@ private:
     void steer(int coder, const QString& msg) {
         QString err;
         if (Crew::steer(coder, msg, &err)) {
-            note(coder == 0 ? tr("🧭 steered the crew: %1").arg(msg)
-                            : tr("🧭 steered coder %1: %2").arg(coder).arg(msg));
+            note(coder == 0 ? tr("steered the crew: %1").arg(msg)
+                            : tr("steered coder %1: %2").arg(coder).arg(msg));
             host_.setStatus(coder == 0 ? tr("steered the crew") : tr("steered coder %1").arg(coder));
         } else {
             note(tr("steer failed: %1").arg(err), true);
@@ -238,7 +238,7 @@ private:
 PaneSpec makeVoicePaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("voice");
-    s.title = QStringLiteral("🎙 Voice");
+    s.title = QStringLiteral("Voice");
     s.group = QStringLiteral("Tools");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new VoiceWidget(host); };

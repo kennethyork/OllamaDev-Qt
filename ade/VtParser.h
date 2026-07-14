@@ -32,7 +32,7 @@ enum CellAttr : quint8 {
 struct Cell {
     // char32_t, not QChar: a QChar is one UTF-16 unit and cannot hold an astral
     // codepoint, so every emoji became U+FFFD. That is not academic — this app's
-    // own CLI prints "💭 thought for Ns" (U+1F4AD), and the terminal would have
+    // own CLI prints " thought for Ns" (U+1F4AD), and the terminal would have
     // rendered its own output as tofu. Splitting astral chars across two cells as
     // surrogate halves (what the JS version did) is worse: it corrupts selection
     // and snapshot text AND still paints two boxes.

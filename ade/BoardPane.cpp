@@ -36,12 +36,10 @@ BoardPane::BoardPane(QWidget* parent) : QWidget(parent) {
     auto* bar = new QHBoxLayout(directorBar_);
     bar->setContentsMargins(0, 0, 0, 0);
     bar->setSpacing(6);
-    auto* icon = new QLabel(QStringLiteral("🧭"), directorBar_);
     steer_ = new QLineEdit(directorBar_);
     steer_->setPlaceholderText(tr("Steer a coder — e.g. \"2: focus on tests\" or \"all: …\""));
     auto* send = new QPushButton(tr("Send"), directorBar_);
     send->setProperty("cta", true);
-    bar->addWidget(icon);
     bar->addWidget(steer_, 1);
     bar->addWidget(send);
     root->addWidget(directorBar_);
@@ -213,7 +211,7 @@ QWidget* BoardPane::makeCard(const QJsonObject& s) {
     if (!s.value("role").toString().isEmpty() && s.value("role").toString() != "coder")
         role = QStringLiteral(" <span style='color:%1'>· %2</span>")
                    .arg(c.accent2.name(), esc(s.value("role").toString()));
-    auto* title = new QLabel(QStringLiteral("🤖 <b>#%1 %2</b>%3")
+    auto* title = new QLabel(QStringLiteral("<b>#%1 %2</b>%3")
                                  .arg(n)
                                  .arg(esc(s.value("title").toString()), role),
                              card);
@@ -356,7 +354,7 @@ void BoardPane::sendSteer() {
     QString err;
     if (Crew::steer(coder, msg, &err)) {
         steer_->clear();
-        emit statusMessage(coder == 0 ? tr("🧭 steered the crew") : tr("🧭 steered coder %1").arg(coder));
+        emit statusMessage(coder == 0 ? tr("steered the crew") : tr("steered coder %1").arg(coder));
     } else {
         emit statusMessage(tr("⚠ steer failed: %1").arg(err));
     }

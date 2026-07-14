@@ -813,7 +813,7 @@ void Thinking::collapse() {
         sink_(QStringLiteral("\n"));
         return;
     }
-    const QString label = QString::fromUtf8(ansi::kDim) + QStringLiteral("💭 thought for ") +
+    const QString label = QString::fromUtf8(ansi::kDim) + QStringLiteral("thought for ") +
                           dur(secs) + QString::fromUtf8(ansi::kReset);
     sink_(rewind() + summaryPrefix_ + label + QStringLiteral("\n"));
     drawn_ = 0;

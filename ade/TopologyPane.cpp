@@ -54,7 +54,7 @@ protected:
         if (runId.isEmpty() || subs.isEmpty()) {
             p.setPen(c.faint);
             p.drawText(rect().adjusted(24, 24, -24, -24), Qt::AlignCenter | Qt::TextWordWrap,
-                       tr("No crew running.\nLaunch one — 👥 Crew, or `ollamadev crew \"…\"` — and "
+                       tr("No crew running.\nLaunch one —  Crew, or `ollamadev crew \"…\"` — and "
                           "the whole team appears here live: the Director and each coder, coloured "
                           "by state."));
             return;
@@ -67,7 +67,7 @@ protected:
         const int dirW = qMin(width() - 40, 420), dirH = 58;
         const QRectF dir((width() - dirW) / 2.0, 16, dirW, dirH);
         drawNode(p, dir, c.accent2,
-                 QStringLiteral("🧭 Director  %1").arg(active ? tr("● live") : tr("○ done")),
+                 QStringLiteral("Director  %1").arg(active ? tr("● live") : tr("○ done")),
                  task.isEmpty() ? tr("(waiting for a task)") : task, c);
 
         // ---- coder cards, wrapped grid below ----
@@ -117,7 +117,7 @@ private:
         if (st == QLatin1String("doing")) return QStringLiteral("● working");
         if (st == QLatin1String("done")) return QStringLiteral("✓ done");
         if (st == QLatin1String("held")) return QStringLiteral("⚠ held");
-        if (st == QLatin1String("flagged")) return QStringLiteral("⚑ flagged");
+        if (st == QLatin1String("flagged")) return QStringLiteral("flagged");
         return QStringLiteral("○ queued");
     }
 
@@ -160,7 +160,7 @@ private:
         p.setFont(f);
         p.setPen(c.fg);
         p.drawText(r.adjusted(12, 7, -8, 0), Qt::AlignLeft | Qt::AlignTop,
-                   p.fontMetrics().elidedText(QStringLiteral("👷 #%1 %2").arg(n).arg(role),
+                   p.fontMetrics().elidedText(QStringLiteral("#%1 %2").arg(n).arg(role),
                                               Qt::ElideRight, r.width() - 20));
         f.setBold(false);
         p.setFont(f);
@@ -185,7 +185,7 @@ private:
 PaneSpec makeTopologyPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("topology");
-    s.title = QStringLiteral("🛰 Crew topology");
+    s.title = QStringLiteral("Crew topology");
     s.group = QStringLiteral("Crew");
     s.singleton = true;
     s.factory = [](PaneHost&) -> QWidget* { return new TopologyView; };

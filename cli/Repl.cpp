@@ -539,7 +539,7 @@ QString Repl::undoLast() {
 void Repl::announceCalls(const QVector<ToolCall>& calls) const {
     for (const ToolCall& c : calls) {
         const QString args = describeArgs(c);
-        emitRaw(dim(QStringLiteral("  ⚙ ") + c.name +
+        emitRaw(dim(QStringLiteral("  ") + c.name +
                     (args.isEmpty() ? QString() : QStringLiteral("(") + args + QStringLiteral(")"))) +
                 QLatin1Char('\n'));
     }
@@ -599,7 +599,7 @@ void Repl::runTurn(const QString& text) {
     int attached = 0;
     const QString cleaned = Vision::attach(user, text, &attached);
     if (attached > 0)
-        emitRaw(dim(QStringLiteral("  🖼 attached %1 image(s)").arg(attached)) + QLatin1Char('\n'));
+        emitRaw(dim(QStringLiteral("attached %1 image(s)").arg(attached)) + QLatin1Char('\n'));
 
     user.content = expandMentions(cleaned);
     session_.messages().append(user);
@@ -707,7 +707,7 @@ void Repl::runTurn(const QString& text) {
     for (const QString& p : touchedThisTurn_)
         existing << QDir::current().relativeFilePath(p);
     if (!existing.isEmpty())
-        emitRaw(dim(QStringLiteral("  ✎ ") + existing.join(QStringLiteral(", ")) +
+        emitRaw(dim(QStringLiteral("  ") + existing.join(QStringLiteral(", ")) +
                     QStringLiteral("  (/undo reverts the last one)")) +
                 QLatin1Char('\n'));
 
@@ -717,7 +717,7 @@ void Repl::runTurn(const QString& text) {
     const int threshold = Config::integer(QStringLiteral("agents.compactThreshold"), 30);
     if (session_.messages().size() >= threshold) {
         const int keep = Config::integer(QStringLiteral("agents.compactKeep"), 8);
-        emitRaw(dim(QStringLiteral("  📝 compacting the conversation…")) + QLatin1Char('\n'));
+        emitRaw(dim(QStringLiteral("compacting the conversation…")) + QLatin1Char('\n'));
         session_.compact(keep);
     }
 }
@@ -812,7 +812,7 @@ QString Repl::cmdContext() const {
     const int bars = 20;
     const int on = pct * bars / 100;
 
-    QString o = QStringLiteral("📁 ") + QDir::currentPath() + QLatin1Char('\n');
+    QString o = QDir::currentPath() + QLatin1Char('\n');
     o += QStringLiteral("Context: [") + QString(on, QLatin1Char('=')) +
          QString(bars - on, QLatin1Char(' ')) +
          QStringLiteral("] %1%  (~%2 / %3 tokens)\n").arg(pct).arg(used).arg(window);
@@ -881,7 +881,7 @@ QString Repl::cmdPlan(const QString& args) {
     else if (wasPlan) Permission::exitPlan();  // back to whatever preceded plan, not a guessed default
 
     rebuildPrompts();
-    return on ? cyan(QStringLiteral("  📋 plan mode ON")) +
+    return on ? cyan(QStringLiteral("plan mode ON")) +
                     dim(QStringLiteral(" — read-only research; I'll propose a plan and wait for "
                                        "your approval before editing.\n"))
               : cyan(QStringLiteral("  plan mode OFF")) +
@@ -983,7 +983,7 @@ QString Repl::cmdCd(const QString& dir) {
     // (crew coders each have their own sandbox), so it has to move too.
     Tools::setThreadRoot(QDir::currentPath());
     rebuildPrompts();
-    return QStringLiteral("📁 ") + QDir::currentPath() + QLatin1Char('\n');
+    return QDir::currentPath() + QLatin1Char('\n');
 }
 
 QString Repl::cmdLs(const QString& dir) const {
@@ -1046,7 +1046,7 @@ Repl::Slash Repl::slash(const QString& input) {
     } else if (cmd == QLatin1String("compact")) {
         const int keep = Config::integer(QStringLiteral("agents.compactKeep"), 8);
         const int before = session_.messages().size();
-        emitRaw(dim(QStringLiteral("  📝 compacting…")) + QLatin1Char('\n'));
+        emitRaw(dim(QStringLiteral("compacting…")) + QLatin1Char('\n'));
         session_.compact(keep);
         out = dim(QStringLiteral("  %1 → %2 messages\n")
                       .arg(before)
@@ -1165,7 +1165,7 @@ int Repl::run() {
     });
 
     Permission::setPlanApprover([this](const QString& plan) {
-        emitRaw(QLatin1Char('\n') + cyan(QStringLiteral("  📋 proposed plan")) + QLatin1Char('\n') +
+        emitRaw(QLatin1Char('\n') + cyan(QStringLiteral("proposed plan")) + QLatin1Char('\n') +
                 (Render::enabled() ? Render::markdown(plan) : plan) + QLatin1Char('\n'));
         if (!confirm(dim(QStringLiteral("  approve and start implementing? [y/N]")))) return false;
         rebuildPrompts();

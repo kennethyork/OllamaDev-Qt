@@ -148,7 +148,7 @@ public:
         root->setContentsMargins(10, 10, 10, 10);
         root->setSpacing(8);
 
-        auto* title = new QLabel(tr("🧠 The crew's brain"), this);
+        auto* title = new QLabel(tr("The crew's brain"), this);
         QFont tf = title->font();
         tf.setBold(true);
         tf.setPointSizeF(tf.pointSizeF() + 2);
@@ -287,7 +287,7 @@ private:
 PaneSpec makeBrainPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("brain");
-    s.title = QStringLiteral("🧠 Brain");
+    s.title = QStringLiteral("Brain");
     s.group = QStringLiteral("Crew");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new BrainWidget(host); };

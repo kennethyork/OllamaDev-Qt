@@ -174,7 +174,7 @@ private:
 PaneSpec makeCodeSearchPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("codesearch");
-    s.title = QStringLiteral("🔎 Code search");
+    s.title = QStringLiteral("Code search");
     s.group = QStringLiteral("Tools");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new CodeSearchWidget(host); };

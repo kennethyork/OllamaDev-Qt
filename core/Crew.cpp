@@ -1052,7 +1052,7 @@ Crew::Result Crew::securityScan(const CrewOptions& opts, const CrewEvents& ev,
 
     // Each scanner is a board card, so a security scan shows up on the kanban like
     // any crew — same To-do/Doing/Done columns, just scanners instead of coders.
-    const QString boardTask = QStringLiteral("🛡 security scan") +
+    const QString boardTask = QStringLiteral("security scan") +
                               (opts.focus.isEmpty() ? QString() : ": " + opts.focus);
     QVector<Subtask> scanners(groups);
     for (int g = 0; g < groups; ++g) {

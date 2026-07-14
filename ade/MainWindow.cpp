@@ -160,9 +160,9 @@ void MainWindow::buildTopBar() {
     });
 
     perms_ = new QComboBox(bar);
-    perms_->addItem(tr("✋ Ask · confirm each change"), QStringLiteral("ask"));
-    perms_->addItem(tr("⚡ Auto · run tools without asking"), QStringLiteral("auto"));
-    perms_->addItem(tr("🔒 Read-only · no changes"), QStringLiteral("readonly"));
+    perms_->addItem(tr("Ask · confirm each change"), QStringLiteral("ask"));
+    perms_->addItem(tr("Auto · run tools without asking"), QStringLiteral("auto"));
+    perms_->addItem(tr("Read-only · no changes"), QStringLiteral("readonly"));
     perms_->setToolTip(tr("How the agent runs tools"));
     {
         const QString saved = Config::str(QStringLiteral("permission.mode"), QStringLiteral("ask"));

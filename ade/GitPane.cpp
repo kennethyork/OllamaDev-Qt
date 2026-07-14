@@ -154,7 +154,7 @@ public:
         root->addWidget(message_);
 
         auto* row = new QHBoxLayout;
-        ai_ = new QPushButton(tr("✨ Write it for me"), this);
+        ai_ = new QPushButton(tr("Write it for me"), this);
         ai_->setToolTip(tr("Have the model write a Conventional Commit message for the staged diff"));
         commit_ = new QPushButton(tr("Commit"), this);
         commit_->setProperty("cta", true);
@@ -439,7 +439,7 @@ private:
 PaneSpec makeGitPaneSpec() {
     PaneSpec s;
     s.kind = QStringLiteral("git");
-    s.title = QStringLiteral("🌿 Git");
+    s.title = QStringLiteral("Git");
     s.group = QStringLiteral("Tools");
     s.singleton = true;
     s.factory = [](PaneHost& h) -> QWidget* { return new GitWidget(h); };

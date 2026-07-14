@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
     QCoreApplication::setOrganizationName("OllamaDev");
     QCoreApplication::setApplicationName("OllamaDev ADE");
 
-    // The UI is full of emoji (💬 🌿 👷) and every one of them was a tofu box. See
+    // The UI is full of emoji (  ) and every one of them was a tofu box. See
     // Theme::withEmoji — Qt does not fall back to a colour emoji font on its own.
     app.setFont(odv::Theme::withEmoji(app.font()));
 
