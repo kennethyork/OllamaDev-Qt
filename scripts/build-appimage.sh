@@ -117,7 +117,13 @@ if [ -x "$WEBPROC" ] && ldd "$APPDIR/usr/bin/ollamadev-ade" 2>/dev/null | grep -
   bundle_libs "$WEBPROC"; sweep   # the render process pulls its own deps
   for pak in "$QT_DATA"/resources/*.pak; do [ -e "$pak" ] && cp -L "$pak" "$APPDIR/usr/resources/"; done
   [ -e "$QT_DATA/resources/icudtl.dat" ] && cp -L "$QT_DATA/resources/icudtl.dat" "$APPDIR/usr/resources/"
-  cp -L "$QT_TR"/qtwebengine_locales/*.pak "$APPDIR/usr/translations/qtwebengine_locales/" 2>/dev/null || true
+  # Chromium ships ~50 UI-language packs (25 MB); a coding tool does not need all
+  # of them. Keep en-US (required) plus the most common languages — the browser
+  # still works everywhere, it just doesn't localise its own chrome into Thai.
+  for loc in en-US en-GB es fr de it pt-BR ru zh-CN zh-TW ja ko; do
+    cp -L "$QT_TR/qtwebengine_locales/$loc.pak" \
+          "$APPDIR/usr/translations/qtwebengine_locales/" 2>/dev/null || true
+  done
   # NSS: libnss3 dlopens its softoken/cert modules — ldd misses them. HTTPS is
   # dead without libnssckbi (the CA bundle), so copy the whole nss dir.
   for d in /usr/lib/x86_64-linux-gnu/nss /usr/lib64/nss; do
@@ -203,9 +209,43 @@ fi
 
 OUT="$DIST/OllamaDev-$AIARCH.AppImage"
 rm -f "$OUT"
-# --appimage-extract-and-run: CI containers have no FUSE, and appimagetool is
-# itself an AppImage that would otherwise fail to mount itself.
-ARCH="$AIARCH" "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT" >/dev/null 2>&1 \
-  || ARCH="$AIARCH" "$TOOL" "$APPDIR" "$OUT"
+# Strip debug symbols from everything we bundled. Distro libs are often already
+# stripped, but Chromium's core frequently is not — this is where the biggest
+# single reduction on the WebEngine build comes from. Never strip in place blindly;
+# --strip-unneeded keeps what the dynamic linker needs.
+echo "▸ stripping…"
+find "$APPDIR/usr/lib" "$APPDIR/usr/bin" "$APPDIR/usr/libexec" -type f 2>/dev/null | while read -r f; do
+  case "$(file -b "$f" 2>/dev/null)" in
+    *ELF*) strip --strip-unneeded "$f" 2>/dev/null || true ;;
+  esac
+done
+
+# Pack. The bundled-Chromium payload is dense: max-level zstd squashfs beats the
+# appimagetool default (gzip) by ~15% here (123 MB → 104 MB). Two constraints pin
+# the choice: appimagetool's --comp is ignored on the current 'continuous' build,
+# and the AppImage type-2 runtime can only MOUNT zlib or zstd (not xz) — so we
+# assemble by hand with zstd, which is all appimagetool does internally anyway:
+# [type-2 runtime][zstd squashfs].
+RUNTIME="$ROOT/.build/tools/runtime-$AIARCH"
+if [ ! -x "$RUNTIME" ]; then
+  curl -fsSL -o "$RUNTIME" \
+    "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$AIARCH" \
+    2>/dev/null && chmod +x "$RUNTIME" || rm -f "$RUNTIME"
+fi
+
+if command -v mksquashfs >/dev/null && [ -x "$RUNTIME" ]; then
+  echo "▸ packing (zstd)…"
+  SQFS="$ROOT/.build/app.sqfs"
+  rm -f "$SQFS"
+  mksquashfs "$APPDIR" "$SQFS" -root-owned -noappend -no-progress \
+    -comp zstd -Xcompression-level 22 -b 1M >/dev/null
+  cat "$RUNTIME" "$SQFS" > "$OUT"
+  chmod +x "$OUT"
+  rm -f "$SQFS"
+else
+  echo "▸ packing (appimagetool fallback — gzip)…"
+  ARCH="$AIARCH" "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT" >/dev/null 2>&1 \
+    || ARCH="$AIARCH" "$TOOL" "$APPDIR" "$OUT"
+fi
 
 echo "✓ $OUT ($(du -h "$OUT" | cut -f1))"
