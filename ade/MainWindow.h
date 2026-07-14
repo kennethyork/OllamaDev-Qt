@@ -89,6 +89,7 @@ private:
     QString wsId_;
     int termSeq_ = 0;
     bool restoring_ = false;
+    bool onboardShown_ = false;  // first-run onboarding hint shown once
 };
 
 }  // namespace odv

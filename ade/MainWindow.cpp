@@ -510,6 +510,11 @@ void MainWindow::pingOllama() {
         if (reply->error() != QNetworkReply::NoError) {
             conn_->setStyleSheet(QStringLiteral("color:%1;").arg(c.err.name()));
             conn_->setToolTip(tr("Ollama unreachable — %1").arg(reply->errorString()));
+            if (!onboardShown_) {
+                onboardShown_ = true;
+                status(tr("Ollama isn't running. Start it (ollama serve), then Add → Start → "
+                          "Setup to pick a model."));
+            }
             return;
         }
         conn_->setStyleSheet(QStringLiteral("color:%1;").arg(c.ok.name()));
@@ -520,7 +525,18 @@ void MainWindow::pingOllama() {
             QJsonDocument::fromJson(reply->readAll()).object().value("models").toArray();
         for (const QJsonValue& v : arr) tags << v.toObject().value("name").toString();
         tags.removeAll(QString());
-        if (tags.isEmpty()) return;
+        if (tags.isEmpty()) {
+            // Connected but empty — the one real first-run dead end. Point at Setup
+            // once, and open the Start pane so the button is right there.
+            if (!onboardShown_) {
+                onboardShown_ = true;
+                status(tr("Ollama has no models yet — Add → Start → Setup recommends and pulls "
+                          "one for your hardware."));
+                if (PaneRegistry::instance().find(QStringLiteral("start")))
+                    addPaneOfKind(QStringLiteral("start"));
+            }
+            return;
+        }
 
         QStringList have;
         for (int i = 0; i < models_->count(); ++i) have << models_->itemText(i);

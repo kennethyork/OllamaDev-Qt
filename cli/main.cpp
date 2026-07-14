@@ -504,6 +504,23 @@ int cmdOneShot(const QString& prompt, const QStringList& args) {
         model = b ? b->defaultModel() : QString();
     }
 
+    // First-run dead end, turned into a signpost: on Ollama with nothing set up,
+    // send the user to the one-step onboarding rather than a cryptic empty reply.
+    if (backend == "ollama") {
+        auto b = Backends::get(backend);
+        if (b && b->available() && b->models().isEmpty()) {
+            err() << "Ollama has no models yet. Run one-step setup (picks + pulls a model for "
+                     "your hardware):\n  ollamadev setup\n";
+            err().flush();
+            return 1;
+        }
+        if (b && !b->available()) {
+            err() << "Can't reach Ollama. Start it with `ollama serve`, then `ollamadev setup`.\n";
+            err().flush();
+            return 1;
+        }
+    }
+
     Agent a(backend, model);
     Permission::setMode(PermMode::Auto);
     Permission::setInteractive(true);

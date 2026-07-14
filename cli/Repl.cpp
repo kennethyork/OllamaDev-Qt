@@ -299,10 +299,11 @@ bool Repl::preflight() const {
         emitRaw(QLatin1Char('\n') + yellow(QStringLiteral("  ⚠ can't reach ")) +
                 Backends::labelFor(backendId_) + QLatin1Char('\n'));
         if (backendId_ == QLatin1String("ollama")) {
-            emitRaw(dim(QStringLiteral("    1. start the server:  ")) +
+            emitRaw(dim(QStringLiteral("    start the server:  ")) +
                     cyan(QStringLiteral("ollama serve")) + QLatin1Char('\n'));
-            emitRaw(dim(QStringLiteral("    2. pull a model:      ")) +
-                    cyan(QStringLiteral("ollama pull qwen3.5:9b")) + QLatin1Char('\n'));
+            emitRaw(dim(QStringLiteral("    then, one-time setup (detects your hardware, picks + "
+                                       "pulls a model):\n      ")) +
+                    cyan(QStringLiteral("ollamadev setup")) + QLatin1Char('\n'));
             emitRaw(dim(QStringLiteral("    remote host? set OLLAMA_HOST or ollama.host in the "
                                        "config.")) +
                     QStringLiteral("\n\n"));
@@ -311,9 +312,11 @@ bool Repl::preflight() const {
     }
     if (installedModels().isEmpty()) {
         emitRaw(QLatin1Char('\n') +
-                yellow(QStringLiteral("  ⚠ the backend is up but has no models installed.")) +
-                QLatin1Char('\n') + dim(QStringLiteral("    pull one:  ")) +
-                cyan(QStringLiteral("ollama pull qwen3.5:9b")) + QStringLiteral("\n\n"));
+                yellow(QStringLiteral("  ⚠ Ollama is up but has no models yet.")) +
+                QLatin1Char('\n') +
+                dim(QStringLiteral("    get started in one step (recommends + pulls a model for "
+                                   "your hardware):\n      ")) +
+                cyan(QStringLiteral("ollamadev setup")) + QStringLiteral("\n\n"));
         return false;
     }
     return true;
