@@ -88,6 +88,13 @@ static void testSandbox() {
     check(!cs.empty(), "capture sees the new file");
     check(cs.created.contains("src/deep/nested/new.txt"), "capture records the nested path");
 
+    // `crew resume` reloads a finished coder's changeset from disk instead of
+    // re-running the model, so load() must round-trip capture().
+    const Changeset reloaded = Sandbox::load(store.path());
+    check(reloaded.created == cs.created && reloaded.diff == cs.diff,
+          "Sandbox::load round-trips a captured changeset");
+    check(Sandbox::load("/nonexistent/store").empty(), "Sandbox::load of a missing store is empty");
+
     QStringList wrote;
     check(Sandbox::apply(store.path(), proj.path(), &wrote, &err), "apply lands the changeset");
     check(QFile::exists(proj.path() + "/src/deep/nested/new.txt"),
@@ -238,6 +245,21 @@ static void testCliArgvIsCurrent() {
           "gemini: --skip-trust is required or yolo silently downgrades and hangs");
 }
 
+// `crew resume` must reload the saved plan and skip finished coders, never
+// re-plan or re-run work that already landed.
+static void testCrewResume() {
+    const QString crew = readSource(QStringLiteral("core/Crew.cpp"));
+    check(crew.contains("writePlan(") && crew.contains("plan.json"),
+          "crew persists a durable plan.json so a run can be resumed");
+    check(crew.contains("bool resuming") && crew.contains("opts.resumeRunId"),
+          "run() branches on resumeRunId to reload the plan instead of re-planning");
+    check(crew.contains("skipRun"),
+          "resume skips coders that already finished (done/held)");
+    const QString cli = readSource(QStringLiteral("cli/main.cpp"));
+    check(cli.contains("cmdCrewResume") && cli.contains("\"resume\""),
+          "CLI wires `crew resume`");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
@@ -250,6 +272,7 @@ int main(int argc, char** argv) {
     s << "parallel\n";   s.flush(); testLimiter();
     s << "backends\n";   s.flush(); testBackends();
     s << "regressions\n"; s.flush(); testNoGlobalProcessNuking(); testCliArgvIsCurrent(); testCliBackendIsSandboxed(); testPerBackendModelRouting();
+    s << "crew-resume\n"; s.flush(); testCrewResume();
 
     s << "\n" << passed << " passed, " << failed << " failed\n";
     s.flush();

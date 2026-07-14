@@ -90,6 +90,13 @@ struct CrewOptions {
     // taught into durable memory (and a reusable skill when there's a pattern).
     // Off by default — the plain crew neither reads nor writes this.
     bool learn = false;
+
+    // Resume an interrupted run: skip Researcher + Director, reload the saved plan
+    // from disk (this runId's plan.json), re-run only the coders that never
+    // finished, then audit and land. Empty = a fresh run. When set, the plan on
+    // disk — not the other fields here — is the source of truth for the task,
+    // focus, and per-coder prompts/models.
+    QString resumeRunId;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI
@@ -133,6 +140,15 @@ public:
 
     static QJsonObject boardState();  // ~/.ollamadev/crew/current.json
     static void clearBoard();
+
+    // One resumable run: a run dir that still has a plan.json. Newest first.
+    struct RunInfo {
+        QString runId;
+        QString task;
+        int done = 0;
+        int total = 0;
+    };
+    static QVector<RunInfo> resumable();
 };
 
 }  // namespace odv

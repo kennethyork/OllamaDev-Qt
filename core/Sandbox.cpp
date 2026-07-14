@@ -386,6 +386,24 @@ Changeset Sandbox::capture(const QString& projectRoot, const QString& sandbox,
     return cs;
 }
 
+Changeset Sandbox::load(const QString& storeDir) {
+    Changeset cs;
+    cs.store = storeDir;
+    const QJsonDocument doc = QJsonDocument::fromJson(readAll(storeDir + QStringLiteral("/manifest.json")));
+    if (!doc.isObject()) return cs;  // no such run / never captured — stays empty
+    const QJsonObject m = doc.object();
+    const auto pull = [&m](const QString& key) {
+        QStringList out;
+        for (const QJsonValue& v : m.value(key).toArray()) out << v.toString();
+        return out;
+    };
+    cs.created = pull(QStringLiteral("created"));
+    cs.modified = pull(QStringLiteral("modified"));
+    cs.deleted = pull(QStringLiteral("deleted"));
+    cs.diff = QString::fromUtf8(readAll(storeDir + QStringLiteral("/diff.txt")));
+    return cs;
+}
+
 bool Sandbox::apply(const QString& storeDir, const QString& projectRoot, QStringList* wrote,
                     QString* err) {
     const QByteArray raw = readAll(storeDir + QStringLiteral("/manifest.json"));

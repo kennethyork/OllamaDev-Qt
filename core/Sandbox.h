@@ -40,6 +40,12 @@ public:
     static Changeset capture(const QString& projectRoot, const QString& sandbox,
                              const QString& storeDir);
 
+    // Reload a changeset previously written by capture() from its store, without
+    // any sandbox. `crew resume` uses this: a coder that already finished keeps
+    // its changeset on disk, so the run re-audits and lands it rather than
+    // re-running the model. Returns an empty Changeset if the store is missing.
+    static Changeset load(const QString& storeDir);
+
     // Copy a stored changeset into the project. Creates parent folders.
     // This is what "accept" runs — it is the only thing that ever writes to the
     // user's tree.

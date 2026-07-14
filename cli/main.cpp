@@ -128,6 +128,7 @@ void printHelp() {
           << "  ollamadev crew accept <n>    apply held work into your folder\n"
           << "  ollamadev crew discard <n>   throw held work away\n"
           << "  ollamadev crew steer <n> \"…\" talk to a running coder\n"
+          << "  ollamadev crew resume [id]   finish an interrupted run (no id = latest)\n"
           << "  ollamadev crew role|pack     personas the Director assigns · saved crew configs\n"
           << "  ollamadev board              pending decisions\n"
           << "  crew brain options (all opt-in — plain crew is unchanged):\n"
@@ -231,6 +232,67 @@ int cmdBackends() {
     return 0;
 }
 
+// Shared by `crew` and `crew resume`: wire the progress events, run, and print
+// the applied/held summary. The caller has already filled `o`.
+static int runCrewAndReport(CrewOptions& o) {
+    CrewEvents ev;
+    ev.onPhase = [](const QString& p, const QString& m) {
+        out() << "\n▸ " << p << ": " << m << "\n";
+        out().flush();
+    };
+    ev.onLog = [](const QString& m) {
+        out() << "  " << m << "\n";
+        out().flush();
+    };
+    ev.onCoderState = [](int n, const QString& s) {
+        out() << "  coder #" << n << " → " << s << "\n";
+        out().flush();
+    };
+
+    CancelToken cancel;
+    const auto r = Crew::run(o, ev, cancel);
+
+    out() << "\n" << r.applied.size() << " applied · " << r.held.size() << " held\n";
+    if (!r.held.isEmpty()) {
+        out() << "Review held work:  ollamadev board\n"
+              << "Apply it:          ollamadev crew accept <n>\n";
+    }
+    out().flush();
+    return 0;
+}
+
+// `ollamadev crew resume [runId|list]` — finish an interrupted run. With no id it
+// picks the most recent resumable run; coders that already finished are not re-run.
+int cmdCrewResume(const QStringList& args) {
+    const QVector<Crew::RunInfo> runs = Crew::resumable();
+    if (args.value(0) == "list") {
+        if (runs.isEmpty()) {
+            out() << "no resumable runs\n";
+            out().flush();
+            return 0;
+        }
+        for (const auto& r : runs)
+            out() << "  " << r.runId << "   " << r.done << "/" << r.total << " done   "
+                  << r.task.left(60) << "\n";
+        out().flush();
+        return 0;
+    }
+    QString runId = args.value(0);
+    if (runId.isEmpty()) {
+        if (runs.isEmpty()) {
+            err() << "no run to resume — start one with: ollamadev crew \"…\"\n";
+            err().flush();
+            return 1;
+        }
+        runId = runs.first().runId;  // newest
+        out() << "resuming " << runId << "\n";
+        out().flush();
+    }
+    CrewOptions o;
+    o.resumeRunId = runId;
+    return runCrewAndReport(o);
+}
+
 int cmdCrew(const QStringList& args) {
     CrewOptions o;
     o.task = args.value(0);
@@ -264,30 +326,7 @@ int cmdCrew(const QStringList& args) {
         return 2;
     }
 
-    CrewEvents ev;
-    ev.onPhase = [](const QString& p, const QString& m) {
-        out() << "\n▸ " << p << ": " << m << "\n";
-        out().flush();
-    };
-    ev.onLog = [](const QString& m) {
-        out() << "  " << m << "\n";
-        out().flush();
-    };
-    ev.onCoderState = [](int n, const QString& s) {
-        out() << "  coder #" << n << " → " << s << "\n";
-        out().flush();
-    };
-
-    CancelToken cancel;
-    const auto r = Crew::run(o, ev, cancel);
-
-    out() << "\n" << r.applied.size() << " applied · " << r.held.size() << " held\n";
-    if (!r.held.isEmpty()) {
-        out() << "Review held work:  ollamadev board\n"
-              << "Apply it:          ollamadev crew accept <n>\n";
-    }
-    out().flush();
-    return 0;
+    return runCrewAndReport(o);
 }
 
 int cmdBoard(const QStringList& args) {
@@ -2426,6 +2465,7 @@ int main(int argc, char** argv) {
         QString e;
         if (sub == "role") return cmdCrewRole(rest.mid(1));
         if (sub == "pack") return cmdCrewPack(rest.mid(1));
+        if (sub == "resume") return cmdCrewResume(rest.mid(1));
         if (sub == "accept") {
             if (Crew::accept(rest.value(1).toInt(), &e)) {
                 out() << "✓ applied\n";
