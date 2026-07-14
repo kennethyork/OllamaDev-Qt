@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QStandardPaths>
 #include <QJsonObject>
 #include <QProcess>
 #include <QTextStream>
@@ -908,9 +909,30 @@ int cmdAgents(const QStringList& args) {
     return 0;
 }
 
+// Is the binary on the PATH the one that just ran? If not, every change the user
+// makes appears to do nothing, and they debug the wrong file — a failure mode that
+// wastes an afternoon and gives no clue that it is happening at all.
+void reportStaleInstall() {
+    const QString running = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
+    const QString onPath = QStandardPaths::findExecutable(QStringLiteral("ollamadev"));
+    if (onPath.isEmpty() || running.isEmpty()) return;
+
+    const QString pathReal = QFileInfo(onPath).canonicalFilePath();
+    if (pathReal == running) return;  // the usual, happy case
+
+    const QDateTime mine = QFileInfo(running).lastModified();
+    const QDateTime theirs = QFileInfo(pathReal).lastModified();
+    out() << "binary      " << running << "\n";
+    out() << "on PATH     " << pathReal
+          << (theirs < mine ? "   ← OLDER than the one you are running" : "") << "\n";
+    if (theirs < mine)
+        out() << "            `ollamadev` in a shell runs THAT one. Refresh it: ./install.sh\n";
+}
+
 int cmdDoctor() {
     Config::load();
     out() << "OllamaDev " << ODV_VERSION << "\n";
+    reportStaleInstall();
     out() << "config      " << Config::homeDir() << "\n";
     out() << "ollama host " << Config::str("ollama.host") << "\n";
     auto ollama = Backends::get("ollama");
