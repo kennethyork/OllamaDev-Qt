@@ -16,6 +16,7 @@
 #include "Board.h"
 #include "Config.h"
 #include "Json.h"
+#include "Memory.h"
 #include "Models.h"
 #include "Parallel.h"
 #include "Router.h"
@@ -137,6 +138,22 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
             {"user", "Task: " + opts.task, {}, {}, {}, {}, {}}};
         research = r.loop(msgs, Config::integer("crew.researchIterations", 6), {}, cancel);
         writeFile(runDir(runId) + "/research.md", research);
+    }
+
+    // ---- Prior knowledge (learning loop, opt-in) --------------------------
+    // What earlier runs distilled — memory facts and the skills catalog — folded
+    // into the shared context so this run starts already knowing them. Reuses the
+    // `research` channel that every downstream role already receives.
+    if (opts.learn) {
+        QString prior;
+        const QString mem = Memory::index(24);
+        if (!mem.isEmpty()) prior += "What past runs learned about this project:\n" + mem + "\n\n";
+        const QString skills = Skills::catalogFor(projectRoot);
+        if (!skills.isEmpty()) prior += "Skills available:\n" + skills + "\n";
+        if (!prior.isEmpty()) {
+            research = prior + (research.isEmpty() ? QString() : "\n---\n" + research);
+            if (ev.onLog) ev.onLog("loaded prior knowledge (memory + skills)");
+        }
     }
 
     // ---- Director: decompose into independent, non-overlapping subtasks ----
@@ -585,6 +602,53 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     out.results = results;
     publishBoard(runId, opts.task, subs, false);
     for (const auto& sb : sandboxes) Sandbox::removeTree(sb);
+    // ---- Learn (opt-in) ---------------------------------------------------
+    // Distil what this run taught into durable memory, and — when the run
+    // produced something with a reusable shape — a skill. Next run loads both.
+    if (opts.learn && !cancel.cancelled()) {
+        phase("learn", "distilling what this run taught");
+        QString summary = "Task: " + opts.task + "\n\n";
+        for (const auto& r : results) {
+            if (r.n == 0) continue;
+            summary += QStringLiteral("- coder #%1 (%2): %3 — files: %4\n")
+                           .arg(r.n)
+                           .arg(out.applied.contains(r.n) ? "applied" : "held",
+                                r.audit.summary.isEmpty() ? subs[r.n - 1].title : r.audit.summary,
+                                r.files.join(", "));
+        }
+        if (!research.isEmpty()) summary += "\nResearch:\n" + research.left(3000);
+
+        const QString lb = backendFor(opts.directorBackend);
+        const QString lm = routedForTier(lb, opts.directorModel, QStringLiteral("moderate"));
+        const QStringList facts = Memory::autoRemember(summary, lb, lm);
+
+        // A reusable skill, only when the run actually applied something.
+        int skillsWritten = 0;
+        if (!out.applied.isEmpty()) {
+            if (auto backend = Backends::get(lb)) {
+                const QString sys =
+                    "From this completed work, extract AT MOST ONE reusable project convention "
+                    "worth remembering as a skill (how this codebase does a recurring thing). Only "
+                    "if there is a genuine, reusable pattern — otherwise reply {}. JSON only: "
+                    "{\"name\":\"kebab-name\",\"description\":\"one line\",\"body\":\"markdown "
+                    "instructions\"}";
+                const QJsonObject s = backend->chatJson(
+                    lm, {{"system", sys, {}, {}, {}, {}, {}}, {"user", summary, {}, {}, {}, {}, {}}},
+                    cancel);
+                const QString name = s.value("name").toString().trimmed();
+                const QString body = s.value("body").toString().trimmed();
+                if (!name.isEmpty() && !body.isEmpty()) {
+                    Skills::save(name, s.value("description").toString(), body);
+                    ++skillsWritten;
+                }
+            }
+        }
+        if (ev.onLog)
+            ev.onLog(QStringLiteral("learned: %1 fact(s), %2 skill(s)")
+                         .arg(facts.size())
+                         .arg(skillsWritten));
+    }
+
     // ---- Token efficiency -------------------------------------------------
     // The point people care about: what did this run cost, and how much did
     // routing save? "Cost" here is the free-local vs paid-cloud split, because

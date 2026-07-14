@@ -84,6 +84,12 @@ struct CrewOptions {
 
     // Raise the coder cap for a bigger swarm (0 → the default cap of 8).
     int swarmMax = 0;
+
+    // The learning loop: before the run, load what past runs learned (memory +
+    // skills) into the crew's context; after the run, distill what THIS run
+    // taught into durable memory (and a reusable skill when there's a pattern).
+    // Off by default — the plain crew neither reads nor writes this.
+    bool learn = false;
 };
 
 // Progress events, emitted from worker threads. The CLI prints them; the GUI
