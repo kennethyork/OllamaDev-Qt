@@ -25,7 +25,13 @@ int main(int argc, char** argv) {
     odv::Tools::registerAll();
     odv::Theme::apply(&app, odv::Theme::current());
 
-    odv::MainWindow w;
+    // An explicit folder on the command line (the .desktop file's `%F`, or a path
+    // typed after the binary) wins. With none — the usual menu launch, whose cwd is
+    // just $HOME — the window falls back to the last active workspace instead.
+    const QStringList args = app.arguments();
+    const QString startupPath = args.size() > 1 ? args.at(1) : QString();
+
+    odv::MainWindow w(startupPath);
     w.show();
     return app.exec();
 }

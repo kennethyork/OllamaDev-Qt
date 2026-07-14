@@ -110,9 +110,32 @@ QString withOdvCli(const QString& command) {
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    project_ = QDir::currentPath();
+// The folder to open at launch. An explicit path (command-line / .desktop `%F`)
+// wins; otherwise the last active workspace, so a menu launch — whose cwd is only
+// ever $HOME — reopens what you were working on rather than a blank canvas keyed
+// to your home directory. The launch cwd is the last resort.
+static QString startupProject(const QString& explicitPath) {
+    if (!explicitPath.isEmpty()) {
+        const QString abs = QDir(explicitPath).absolutePath();
+        if (QFileInfo(abs).isDir()) return abs;
+    }
+    const QString activeId = Workspaces::activeId();
+    if (!activeId.isEmpty())
+        for (const Workspace& w : Workspaces::all())
+            if (w.id == activeId && QFileInfo(w.path).isDir()) return w.path;
+    return QDir::currentPath();
+}
+
+MainWindow::MainWindow(const QString& startupPath, QWidget* parent) : QMainWindow(parent) {
+    project_ = startupProject(startupPath);
     wsId_ = workspaceId(project_);
+
+    // The window may have been launched from a menu (cwd == $HOME) but is opening a
+    // different project. Re-root everything now, exactly as openProject() does, or
+    // the file tree, the crew, and every tool would quietly operate in $HOME.
+    QDir::setCurrent(project_);
+    Tools::setThreadRoot(project_);
+    Config::load();
 
     setWindowTitle(QStringLiteral("OllamaDev ADE — %1").arg(QFileInfo(project_).fileName()));
     resize(1440, 900);

@@ -34,7 +34,9 @@ class MainWindow : public QMainWindow, public PaneHost {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    // `startupPath`, when non-empty, is the project folder to open (an explicit
+    // command-line argument). Empty means "reopen the last active workspace".
+    explicit MainWindow(const QString& startupPath = {}, QWidget* parent = nullptr);
     ~MainWindow() override;
 
     // PaneHost — the surface registered panes reach the app through.
