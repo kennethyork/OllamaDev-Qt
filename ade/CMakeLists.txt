@@ -23,6 +23,7 @@ qt_add_executable(ollamadev-ade
     CommandPalette.cpp CommandPalette.h
     ManageDialogs.cpp ManageDialogs.h
     ThemeDialog.cpp ThemeDialog.h
+    BrainPane.cpp BrainPane.h
 )
 target_link_libraries(ollamadev-ade PRIVATE odv-core Qt6::Core Qt6::Network Qt6::Widgets)
 set_target_properties(ollamadev-ade PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)

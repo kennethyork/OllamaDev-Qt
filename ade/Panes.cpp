@@ -7,6 +7,7 @@
 // not collide.
 
 #include "AgentTeamPane.h"
+#include "BrainPane.h"
 #include "BrowserPane.h"
 #include "CodeSearchPane.h"
 #include "GraphPane.h"
@@ -27,6 +28,7 @@ void registerExtraPanes() {
     r.add(makeVoicePaneSpec());
     r.add(makeTopologyPaneSpec());
     r.add(makeAgentTeamPaneSpec());
+    r.add(makeBrainPaneSpec());
 }
 
 }  // namespace odv
