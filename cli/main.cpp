@@ -123,7 +123,7 @@ QStringList positionals(const QStringList& a) {
 void printHelp() {
     out() << "OllamaDev " << ODV_VERSION << " — Ollama and every major coding CLI, in parallel\n\n"
           << "Usage: ollamadev [command] [options]\n\n"
-          << "  ollamadev                    interactive chat (-c resumes this folder's session)\n"
+          << "  ollamadev                    interactive chat (auto-resumes this folder; --new for fresh)\n"
           << "  ollamadev \"<prompt>\"        one-shot agent turn\n"
           << "  ollamadev backends           which providers are installed and how wide they run\n"
           << "  ollamadev models             list models on the active backend\n"
@@ -2768,7 +2768,7 @@ int cmdCompletion(const QStringList& args) {
         "chat models backends doctor crew board index code-search search skills memory "
         "config completion load resume pull setup context stats diff commit ship pr git "
         "test verify watch terminal hooks commands mcp scan voice transcribe lsp eval "
-        "help --help --version --backend --model --continue --resume -h -v -m -c";
+        "help --help --version --backend --model --continue --resume --new -h -v -m -c";
 
     if (shell == "bash") {
         out() << "# OllamaDev bash completion — install: ollamadev completion bash >> ~/.bashrc\n"
@@ -2895,7 +2895,10 @@ int main(int argc, char** argv) {
         ReplOptions o;
         o.backend = flagValue(args, "--backend");
         o.model = flagValue(args, "--model", flagValue(args, "-m"));
-        o.resume = hasFlag(args, "-c") || hasFlag(args, "--continue");
+        // Auto-resume this folder's most recent session by default; --new forces a
+        // fresh one. -c/--continue stay as (now redundant) explicit opt-ins. The
+        // first run in a folder has nothing to resume and starts fresh silently.
+        o.resume = !hasFlag(args, "--new");
         return Repl(o).run();
     }
 
