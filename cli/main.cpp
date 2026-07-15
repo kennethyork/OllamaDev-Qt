@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
@@ -118,6 +119,44 @@ QStringList positionals(const QStringList& a) {
         out << t;
     }
     return out;
+}
+
+// Reconcile the CLI's working directory with the shared "current project" — the
+// active workspace the desktop also follows (~/.ollamadev/workspaces.json). Scoped
+// to folders already bookmarked as workspaces, so a throwaway run in /tmp never
+// disturbs it. Three cases:
+//   * cwd is at or inside a bookmarked workspace -> that IS the current project;
+//     publish it as active (the desktop follows) and stay put. The deepest such
+//     workspace wins, so a project nested under a broader one is picked correctly.
+//   * cwd is unrelated to any workspace -> FOLLOW the active workspace: chdir into
+//     it, so `ollamadev` from anywhere reopens the project you (or the desktop)
+//     last had active, and auto-resume picks up its session.
+//   * no active workspace -> stay in cwd (the historical behaviour).
+void syncCurrentProject() {
+    const QString cwdCanon = QFileInfo(QDir::currentPath()).canonicalFilePath();
+    const QVector<Workspace> all = Workspaces::all();
+
+    const Workspace* enclosing = nullptr;
+    int deepest = -1;
+    for (const Workspace& w : all) {
+        const QString wp = QFileInfo(w.path).canonicalFilePath();
+        if (wp.isEmpty()) continue;  // a bookmarked folder that no longer exists
+        if (cwdCanon == wp || cwdCanon.startsWith(wp + QLatin1Char('/'))) {
+            if (wp.length() > deepest) { enclosing = &w; deepest = wp.length(); }
+        }
+    }
+    if (enclosing) {
+        Workspaces::open(enclosing->id);  // mark active + bump lastOpened
+        return;
+    }
+
+    const QString activeId = Workspaces::activeId();
+    if (activeId.isEmpty()) return;
+    for (const Workspace& w : all)
+        if (w.id == activeId) {
+            if (QFileInfo(w.path).isDir()) QDir::setCurrent(w.path);
+            return;
+        }
 }
 
 void printHelp() {
@@ -2892,6 +2931,10 @@ int main(int argc, char** argv) {
     // `ollamadev -m <model>` / `-c`: those select a model and a session, they are
     // not a one-shot prompt, and dropping into help there is just a dead end.
     if (positionals(args).isEmpty()) {
+        // Reconcile with the shared current project before anything reads the cwd:
+        // this may chdir into the active workspace, and session resume / tools all
+        // resolve against QDir::currentPath().
+        syncCurrentProject();
         ReplOptions o;
         o.backend = flagValue(args, "--backend");
         o.model = flagValue(args, "--model", flagValue(args, "-m"));
