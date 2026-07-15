@@ -947,11 +947,14 @@ void MainWindow::restoreState(const QJsonObject& state) {
     const QJsonObject panes = state.value("panes").toObject();
     const QJsonArray extras = state.value("extraPanes").toArray();
     if (panes.isEmpty() && state.value("terminals").toArray().isEmpty() && extras.isEmpty()) {
-        // First run in this project: open a real workbench, not an empty board.
-        ensureFiles(QRectF(16, 16, 320, 520));
-        ensureEditor(QRectF(356, 16, 700, 520));
+        // First run in this project: a small, tidy starter cluster in the top-left,
+        // NOT a workbench that eats the whole screen. It's an infinite canvas — the
+        // point is room to spread out, so defaults open compact and leave it to the
+        // user to grow (or maximise) the pane they're actually working in.
+        ensureFiles(QRectF(16, 16, 250, 300));
+        ensureEditor(QRectF(282, 16, 430, 300));
         addTerminal(QStringLiteral("term_%1").arg(++termSeq_), project_, QString(),
-                    QRectF(16, 556, 1040, 320));
+                    QRectF(16, 332, 696, 200));
         restoring_ = false;
         return;
     }
