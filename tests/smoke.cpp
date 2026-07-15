@@ -1287,32 +1287,28 @@ static void testWorktreeSandbox() {
 // session model — but only falls to it, never breaks a fresh install that never
 // pulled it.
 static void testGitModel() {
+    // Config::load() is load-once, so we can't re-read a file mid-run; drive the
+    // LIVE config with setPref (which also updates it in memory). Point HOME at a
+    // throwaway dir first so setPref writes to a scratch ade-prefs.json and never
+    // touches the real one.
     const QByteArray realHome = qgetenv("HOME");
     QTemporaryDir home;
     qputenv("HOME", home.path().toUtf8());
-    Config::load();
-
-    // Nothing set, and gpt-oss:20b is not installed in this empty home's view of
-    // things → fall back to the session model, never a dangling default.
-    check(GitFlow::modelFor(QStringLiteral("qwen3.5:9b")) != QString(),
-          "with no git.model set, modelFor returns *something* usable");
 
     // An explicit setting is returned verbatim and never second-guessed — this is
     // the user's own choice (e.g. a big cloud model), and the default must not
     // override it.
-    {
-        QFile f(home.path() + QStringLiteral("/.ollamadev/ade-prefs.json"));
-        QDir().mkpath(QFileInfo(f.fileName()).absolutePath());
-        f.open(QIODevice::WriteOnly);
-        f.write(R"({"git.model":"gpt-oss:120b-cloud"})");
-        f.close();
-    }
-    Config::load();
+    Config::setPref(QStringLiteral("git.model"), QStringLiteral("gpt-oss:120b-cloud"));
     check(GitFlow::modelFor(QStringLiteral("qwen3.5:9b")) == QStringLiteral("gpt-oss:120b-cloud"),
           "an explicit git.model ALWAYS wins over the default");
 
+    // With none set, modelFor falls back to something usable — never a dangling
+    // default, never empty.
+    Config::setPref(QStringLiteral("git.model"), QString());
+    check(GitFlow::modelFor(QStringLiteral("qwen3.5:9b")) != QString(),
+          "with no git.model set, modelFor returns *something* usable");
+
     qputenv("HOME", realHome);
-    Config::load();
 }
 
 int main(int argc, char** argv) {
