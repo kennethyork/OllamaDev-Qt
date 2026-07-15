@@ -144,7 +144,7 @@ Every destructive action names what it will destroy. Force-push is always `--for
 ```
 ollamadev                    interactive agent (-c resumes this folder's session)
 ollamadev "<prompt>"         one-shot: it reads, edits, runs, then stops
-ollamadev crew "<task>"      the parallel bench
+ollamadev crew "<task>"      the crew: plan → build → audit → land
 ollamadev board              held work, waiting on you
 ollamadev commit | ship      the AI git workflow
 ollamadev tidy [N]           AI interactive rebase
@@ -168,7 +168,7 @@ person's project.
 - **Linux only** today. The code is Qt6 and should port, but macOS and Windows are neither built nor
   tested. Do not assume they work.
 - **Build from source.** No signed installers yet.
-- **205 assertions** in the self-test suite, all passing — `install.sh` runs them on every build. Every
+- **226 assertions** in the self-test suite, all passing — `install.sh` runs them on every build. Every
   feature listed here was driven end-to-end against a live model before it was written down.
 - **Not a hosted product.** No account, no telemetry, no credits, nothing to bill you for — and
   equally, nobody on call when it breaks.
