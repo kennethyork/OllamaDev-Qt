@@ -154,8 +154,16 @@ void syncCurrentProject() {
     if (activeId.isEmpty()) return;
     for (const Workspace& w : all)
         if (w.id == activeId) {
-            if (QFileInfo(w.path).isDir() && QDir::setCurrent(w.path))
+            if (QFileInfo(w.path).isDir() && QDir::setCurrent(w.path)) {
                 Config::load();  // the followed project may carry its own ./.ollamadev.json
+                // We just redirected out of the launch dir into another project —
+                // say so on stderr, so a one-shot editing files (or a REPL turn)
+                // can never silently act on the wrong tree.
+                const QString name = w.name.trimmed().isEmpty() ? QFileInfo(w.path).fileName()
+                                                                : w.name.trimmed();
+                err() << "↳ working in " << name << " (" << w.path << ")\n";
+                err().flush();
+            }
             return;
         }
 }
