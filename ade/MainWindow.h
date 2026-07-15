@@ -68,6 +68,7 @@ private:
     void chooseProject();               // Ctrl+O — pick a folder
     void openProject(const QString& path);  // switch project: re-root EVERYTHING
     void buildAddMenu(class QMenu* menu);
+    void addVpsMcp();
 
     Pane* addTerminal(const QString& id, const QString& cwd, const QString& replay,
                       const QRectF& geom);

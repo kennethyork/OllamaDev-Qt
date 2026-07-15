@@ -19,6 +19,8 @@
 
 #include "Backend.h"
 
+class QNetworkRequest;
+
 namespace odv {
 
 // The Ollama HTTP backend: /api/tags, /api/chat, /api/show, /api/ps on
@@ -83,6 +85,13 @@ public:
     // and silently kills all tool-calling. Normalising the schemas on the way
     // out is cheap insurance against that class of bug.
     static QJsonArray sanitizeTools(const QJsonArray& tools);
+
+    // Attaches `ollama.authToken` as an `Authorization: Bearer …` header when one
+    // is set. Ollama has no auth of its own, so a remote host is normally fronted
+    // by a reverse proxy that expects a bearer token; every site that builds a
+    // request to ollama.host (here, the code index, the puller, the GUI's ping)
+    // routes through this so the token reaches all of them.
+    static void applyAuth(QNetworkRequest& req);
 
 private:
     // Raw result of one HTTP attempt. `netError` is a QNetworkReply::NetworkError.

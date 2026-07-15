@@ -21,6 +21,8 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QShortcut>
 #include <QFormLayout>
@@ -51,6 +53,8 @@
 #include "EditorPane.h"
 #include "FilesPane.h"
 #include "ManageDialogs.h"
+#include "Mcp.h"
+#include "OllamaBackend.h"
 #include "Pane.h"
 #include "TerminalWidget.h"
 #include "Theme.h"
@@ -365,8 +369,51 @@ void MainWindow::buildAddMenu(QMenu* menu) {
                 [this, kind] { addPaneOfKind(kind); });
     }
     menu->addSeparator();
+    connect(menu->addAction(tr("Remote VPS (MCP)…")), &QAction::triggered, this,
+            [this] { addVpsMcp(); });
+    menu->addSeparator();
     QAction* center = menu->addAction(tr("Center canvas"));
     connect(center, &QAction::triggered, canvas_, &Canvas::centerAll);
+}
+
+// Register a remote MCP server (typically one running on a VPS) from the GUI, so
+// its tools join the crew's toolset exactly like a local one. Writes an http
+// entry to config.json via Mcp::addHttpServer; the optional token becomes a
+// Bearer header for a server behind an auth proxy.
+void MainWindow::addVpsMcp() {
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Add remote VPS MCP server"));
+    auto* form = new QFormLayout(&dlg);
+
+    auto* name = new QLineEdit(&dlg);
+    name->setPlaceholderText(tr("my-vps"));
+    form->addRow(tr("Name"), name);
+
+    auto* url = new QLineEdit(&dlg);
+    url->setPlaceholderText(QStringLiteral("https://your-vps:8000/mcp"));
+    form->addRow(tr("Server URL"), url);
+
+    auto* token = new QLineEdit(&dlg);
+    token->setEchoMode(QLineEdit::Password);
+    token->setPlaceholderText(tr("only if the server needs auth"));
+    form->addRow(tr("Bearer token"), token);
+
+    auto* buttons =
+        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    QString err;
+    if (Mcp::addHttpServer(name->text().trimmed(), url->text().trimmed(),
+                           token->text().trimmed(), &err)) {
+        status(tr("added MCP server '%1' — it will load on the next crew launch")
+                   .arg(name->text().trimmed()));
+    } else {
+        QMessageBox::warning(this, tr("Could not add server"), err);
+    }
 }
 
 // Right-clicking empty canvas offers the same menu — and drops the new pane at
@@ -536,7 +583,16 @@ QWidget* MainWindow::buildSettingsWidget() {
 
     auto* host = new QLineEdit(
         Config::str(QStringLiteral("ollama.host"), QStringLiteral("http://localhost:11434")), w);
+    host->setPlaceholderText(QStringLiteral("http://localhost:11434"));
     form->addRow(tr("Ollama host"), host);
+
+    // Bearer token for a remote host that sits behind an auth proxy — Ollama has
+    // none of its own, so a public VPS is normally fronted by one. Blank == local,
+    // no header sent. Masked because it is a credential.
+    auto* token = new QLineEdit(Config::str(QStringLiteral("ollama.authToken")), w);
+    token->setEchoMode(QLineEdit::Password);
+    token->setPlaceholderText(tr("only needed for a secured remote host"));
+    form->addRow(tr("Auth token"), token);
 
     auto* temp = new QDoubleSpinBox(w);
     temp->setRange(0.0, 2.0);
@@ -549,8 +605,9 @@ QWidget* MainWindow::buildSettingsWidget() {
     v->addWidget(save, 0, Qt::AlignLeft);
     v->addStretch(1);
 
-    connect(save, &QPushButton::clicked, this, [this, host, temp] {
+    connect(save, &QPushButton::clicked, this, [this, host, token, temp] {
         Config::setPref(QStringLiteral("ollama.host"), host->text().trimmed());
+        Config::setPref(QStringLiteral("ollama.authToken"), token->text().trimmed());
         Config::setPref(QStringLiteral("agents.coder.temperature"), temp->value());
         status(tr("settings saved to ade-prefs.json"));
         pingOllama();
@@ -610,6 +667,7 @@ void MainWindow::pingOllama() {
     const QString host =
         Config::str(QStringLiteral("ollama.host"), QStringLiteral("http://localhost:11434"));
     QNetworkRequest req{QUrl(host + "/api/tags")};
+    OllamaBackend::applyAuth(req);
     req.setTransferTimeout(3000);
     QNetworkReply* reply = net_->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply] {

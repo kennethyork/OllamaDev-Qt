@@ -583,6 +583,24 @@ bool Mcp::addServer(const QString& name, const QString& command, const QStringLi
     return writeConfigFile(cfg, err);
 }
 
+bool Mcp::addHttpServer(const QString& name, const QString& url, const QString& bearerToken,
+                        QString* err) {
+    if (name.isEmpty() || url.isEmpty()) {
+        if (err) *err = QStringLiteral("a remote MCP server needs a name and a URL");
+        return false;
+    }
+    QJsonObject cfg = readConfigFile();
+    QJsonObject servers = cfg.value(QStringLiteral("mcpServers")).toObject();
+
+    QJsonObject entry{{"type", "http"}, {"url", url}};
+    if (!bearerToken.isEmpty())
+        entry.insert(QStringLiteral("headers"),
+                     QJsonObject{{"Authorization", QStringLiteral("Bearer ") + bearerToken}});
+    servers.insert(name, entry);
+    cfg.insert(QStringLiteral("mcpServers"), servers);
+    return writeConfigFile(cfg, err);
+}
+
 bool Mcp::removeServer(const QString& name, QString* err) {
     QJsonObject cfg = readConfigFile();
     QJsonObject servers = cfg.value(QStringLiteral("mcpServers")).toObject();

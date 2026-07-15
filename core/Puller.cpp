@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "Config.h"
+#include "OllamaBackend.h"
 
 namespace odv {
 namespace {
@@ -120,6 +121,7 @@ bool Puller::pull(const QString& modelArg, const QString& hostArg, QString* err)
         QNetworkAccessManager nam;
         QNetworkRequest req{QUrl(host + QStringLiteral("/api/pull"))};
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        OllamaBackend::applyAuth(req);
 
         QEventLoop loop;
         QScopedPointer<QNetworkReply> reply(nam.post(req, payload));

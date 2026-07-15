@@ -80,6 +80,11 @@ public:
     // deliberately writes prefs, not this).
     static bool addServer(const QString& name, const QString& command, const QStringList& args,
                           QString* err);
+    // Register a remote MCP server reached over the HTTP transport — e.g. one
+    // running on a VPS. A non-empty bearerToken is stored as an
+    // `Authorization: Bearer …` header so a server behind an auth proxy works.
+    static bool addHttpServer(const QString& name, const QString& url,
+                              const QString& bearerToken, QString* err);
     static bool removeServer(const QString& name, QString* err);
 
     // Connect to every enabled server and turn its tools into ToolDefs for OUR

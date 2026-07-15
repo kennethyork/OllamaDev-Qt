@@ -39,6 +39,7 @@
 #include "Config.h"
 #include "Json.h"
 #include "Models.h"
+#include "OllamaBackend.h"
 #include "Parallel.h"
 
 namespace odv {
@@ -176,6 +177,7 @@ QVector<float> CodeIndex::embed(const QString& text) {
     QNetworkAccessManager nam;
     QNetworkRequest r{QUrl(ollamaHost() + QStringLiteral("/api/embeddings"))};
     r.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    OllamaBackend::applyAuth(r);
     r.setTransferTimeout(60000);
 
     QEventLoop loop;

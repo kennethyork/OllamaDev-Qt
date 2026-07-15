@@ -81,6 +81,12 @@ QString errorTextOf(const QByteArray& body, int status) {
 OllamaBackend::OllamaBackend()
     : host_(trimSlash(Config::str("ollama.host", "http://localhost:11434"))) {}
 
+void OllamaBackend::applyAuth(QNetworkRequest& req) {
+    const QString token = Config::str(QStringLiteral("ollama.authToken")).trimmed();
+    if (!token.isEmpty())
+        req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
+}
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -131,6 +137,7 @@ OllamaBackend::HttpResult OllamaBackend::request(const char* verb, const QString
     QNetworkAccessManager nam;
     QNetworkRequest req{QUrl(host_ + path)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    applyAuth(req);
     // Inactivity timeout: a long generation keeps resetting it because tokens
     // keep arriving, but a dead socket trips it.
     req.setTransferTimeout(timeoutMs);

@@ -130,6 +130,9 @@ QJsonObject envOverlay() {
     const QString host = envStr("OLLAMA_HOST");
     if (!host.isEmpty()) flat.insert("ollama.host", host);
 
+    const QString apiKey = envStr("OLLAMA_API_KEY");
+    if (!apiKey.isEmpty()) flat.insert("ollama.authToken", apiKey);
+
     const QString model = envStr("OLLAMA_MODEL");
     if (!model.isEmpty()) flat.insert("ollama.defaultModel", model);
 
