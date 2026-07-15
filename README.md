@@ -1,14 +1,16 @@
 # OllamaDev
 
-**A private AI coding workspace — nothing ever leaves your machine.** Your code, your prompts, your
-models: all local, on an infinite canvas of floating terminals, editors, chats and git.
+**A local-first AI coding workspace on an infinite canvas.** Run it fully on local Ollama models and
+nothing leaves your machine — or bring in frontier models (Claude, GPT, Gemini) opt-in, per task,
+through **your own account**, never routed through anyone else. Terminals, editors, chats and git,
+as floating windows you arrange however you like.
 
 When a task is big, hand it to the **crew** and *watch it work* — a Director plans, coders build each
 piece in its own git worktree, an Auditor reads every diff before a line touches your files. Every
 step is visible on the canvas, and you can steer or veto any of it.
 
-Ollama-native. C++20 / Qt6, and **Qt is the only dependency**. No account, no API key, no telemetry,
-no credits.
+Ollama-native. C++20 / Qt6, and **Qt is the only dependency**. The app itself needs no account, holds
+no API keys, has no telemetry, and never phones home.
 
 ![The canvas](docs/img/canvas.png)
 
