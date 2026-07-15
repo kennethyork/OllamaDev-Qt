@@ -5,7 +5,11 @@
 # It deliberately depends on QtCore ONLY (the lane palette lives in GitPane, not in
 # GitGraph), so the headless build — ODV_BUILD_ADE=OFF, which exists precisely to
 # avoid needing a GUI toolchain — still builds and runs the tests.
-add_executable(odv-tests smoke.cpp ../ade/GitGraph.cpp)
+# VtParser is the terminal emulator's core — a QtCore-only byte-in/grid-out state
+# machine with no widget or GUI dependency, so like GitGraph it compiles straight
+# into the headless test binary. It is also the part that broke most this week
+# (reflow, scrollback, box-drawing), which is exactly why it now has tests.
+add_executable(odv-tests smoke.cpp ../ade/GitGraph.cpp ../ade/VtParser.cpp)
 target_link_libraries(odv-tests PRIVATE odv-core Qt6::Core Qt6::Network)
 # The regression tests read the sources: both bugs they guard are bugs of
 # omission, which no happy-path run can catch.
