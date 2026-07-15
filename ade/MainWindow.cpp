@@ -129,18 +129,30 @@ QString withOdvCli(const QString& command) {
 }  // namespace
 
 // The folder to open at launch. An explicit path (command-line / .desktop `%F`)
-// wins; otherwise the last active workspace, so a menu launch — whose cwd is only
-// ever $HOME — reopens what you were working on rather than a blank canvas keyed
-// to your home directory. The launch cwd is the last resort.
+// wins; otherwise the MOST RECENTLY USED workspace — a desktop app is normally
+// launched from a menu, whose cwd is only ever $HOME, so the launch directory is
+// not a reliable signal for which project you want. "Reopen what I last worked in"
+// is. The launch cwd is the last resort, when there are no workspaces at all.
 static QString startupProject(const QString& explicitPath) {
     if (!explicitPath.isEmpty()) {
         const QString abs = QDir(explicitPath).absolutePath();
         if (QFileInfo(abs).isDir()) return abs;
     }
-    const QString activeId = Workspaces::activeId();
-    if (!activeId.isEmpty())
-        for (const Workspace& w : Workspaces::all())
-            if (w.id == activeId && QFileInfo(w.path).isDir()) return w.path;
+    QString best;
+    QDateTime bestWhen;
+    for (const Workspace& w : Workspaces::all()) {
+        if (!QFileInfo(w.path).isDir()) continue;  // a bookmarked folder since deleted
+        const QDateTime when = QDateTime::fromString(w.lastOpened, Qt::ISODate);
+        if (!when.isValid()) {
+            if (best.isEmpty()) best = w.path;  // only as a last resort
+            continue;
+        }
+        if (best.isEmpty() || !bestWhen.isValid() || when > bestWhen) {
+            best = w.path;
+            bestWhen = when;
+        }
+    }
+    if (!best.isEmpty()) return best;
     return QDir::currentPath();
 }
 
