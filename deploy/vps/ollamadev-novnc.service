@@ -1,0 +1,18 @@
+# Serves the VNC display to the browser over WebSocket (noVNC + websockify).
+# Listens on localhost only; Caddy is the public, authenticated, TLS front door.
+[Unit]
+Description=OllamaDev noVNC bridge (websockify)
+After=ollamadev-display.service
+Requires=ollamadev-display.service
+
+[Service]
+User=ollamadev
+EnvironmentFile=/etc/ollamadev/ollamadev-vps.env
+# --web serves the noVNC static client; the positional args bridge the browser
+# WebSocket on NOVNC_PORT to the local VNC on VNC_PORT.
+ExecStart=/bin/sh -c 'exec websockify --web=/usr/share/novnc/ 127.0.0.1:$NOVNC_PORT 127.0.0.1:$VNC_PORT'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

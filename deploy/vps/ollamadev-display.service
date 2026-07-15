@@ -1,0 +1,16 @@
+# The headless display + VNC server. Everything else draws onto this.
+# Install to /etc/systemd/system/ollamadev-display.service (setup.sh does this).
+[Unit]
+Description=OllamaDev headless X display (Xvfb + openbox + x11vnc)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ollamadev
+EnvironmentFile=/etc/ollamadev/ollamadev-vps.env
+ExecStart=/opt/ollamadev/deploy/vps/display-session.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

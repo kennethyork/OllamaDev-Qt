@@ -25,13 +25,35 @@ int main(int argc, char** argv) {
     odv::Tools::registerAll();
     odv::Theme::apply(&app, odv::Theme::current());
 
+    // Window sizing. On a normal desktop we open at the window's own size, but a
+    // VPS/remote-desktop deployment runs on a headless X of a fixed size and wants
+    // the canvas to fill it — hence --fullscreen (kiosk) and --maximized, also
+    // switchable from a systemd unit via ODV_FULLSCREEN=1 / ODV_MAXIMIZED=1.
+    enum class Show { Normal, Maximized, Fullscreen } showMode = Show::Normal;
+    if (qEnvironmentVariableIntValue("ODV_FULLSCREEN") == 1) showMode = Show::Fullscreen;
+    else if (qEnvironmentVariableIntValue("ODV_MAXIMIZED") == 1) showMode = Show::Maximized;
+
     // An explicit folder on the command line (the .desktop file's `%F`, or a path
     // typed after the binary) wins. With none — the usual menu launch, whose cwd is
     // just $HOME — the window falls back to the last active workspace instead.
+    // Flags are stripped first so a `--fullscreen` is never mistaken for a path.
+    QString startupPath;
     const QStringList args = app.arguments();
-    const QString startupPath = args.size() > 1 ? args.at(1) : QString();
+    for (int i = 1; i < args.size(); ++i) {
+        const QString a = args.at(i);
+        if (a == QLatin1String("--fullscreen") || a == QLatin1String("--kiosk"))
+            showMode = Show::Fullscreen;
+        else if (a == QLatin1String("--maximized"))
+            showMode = Show::Maximized;
+        else if (!a.startsWith(QLatin1String("--")) && startupPath.isEmpty())
+            startupPath = a;
+    }
 
     odv::MainWindow w(startupPath);
-    w.show();
+    switch (showMode) {
+        case Show::Fullscreen: w.showFullScreen(); break;
+        case Show::Maximized:  w.showMaximized();  break;
+        case Show::Normal:     w.show();           break;
+    }
     return app.exec();
 }

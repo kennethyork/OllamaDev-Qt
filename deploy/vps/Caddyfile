@@ -1,0 +1,25 @@
+# The ONLY public listener. Caddy terminates TLS (auto Let's Encrypt certs) and
+# gates access with HTTP basic auth before proxying to the local noVNC bridge.
+#
+# 1. Replace ade.example.com with your domain (A record -> the VPS IP).
+# 2. Generate the password hash:  caddy hash-password
+#    then paste it after your username below.
+# 3. Copy to /etc/caddy/Caddyfile and:  systemctl reload caddy
+#
+# No domain yet? Skip Caddy entirely and reach it over an SSH tunnel instead:
+#   ssh -N -L 6080:127.0.0.1:6080 ollamadev@your-vps-ip
+#   then open http://localhost:6080/vnc.html on your laptop. See README.
+
+ade.example.com {
+	# basicauth protects the whole app. Username on the left, `caddy hash-password`
+	# output on the right. Add more lines for more users.
+	basic_auth {
+		you JDJhJDE0JHJlcGxhY2VfdGhpc193aXRoX3lvdXJfb3duX2hhc2g
+	}
+
+	# websockify handles the WebSocket upgrade itself, so a plain reverse_proxy is
+	# all that's needed — Caddy passes Upgrade/Connection headers through.
+	reverse_proxy 127.0.0.1:6080
+
+	encode gzip
+}

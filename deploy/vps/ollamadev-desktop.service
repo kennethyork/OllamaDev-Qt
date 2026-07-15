@@ -1,0 +1,24 @@
+# The GUI itself, drawn onto the display service's screen. Kept separate so a GUI
+# crash restarts the app WITHOUT dropping your VNC session.
+[Unit]
+Description=OllamaDev ADE (canvas GUI)
+After=ollamadev-display.service ollama.service
+Requires=ollamadev-display.service
+Wants=ollama.service
+
+[Service]
+User=ollamadev
+EnvironmentFile=/etc/ollamadev/ollamadev-vps.env
+# The app draws onto the headless display and talks to the local Ollama.
+Environment=DISPLAY=:10
+Environment=ODV_FULLSCREEN=1
+WorkingDirectory=%h
+# Wait for the display to accept connections, then launch the app fullscreen on
+# the project folder. ${ODV_APP}/${ODV_WORKDIR} come from the EnvironmentFile.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/bin/sh -c 'exec "$ODV_APP" --fullscreen "$ODV_WORKDIR"'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
