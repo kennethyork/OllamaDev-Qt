@@ -19,6 +19,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QResizeEvent>
 #include <QWheelEvent>
@@ -32,6 +33,165 @@ namespace odv {
 namespace {
 
 constexpr int kWheelLines = 3;
+
+// --- box drawing as vector primitives ---------------------------------------
+// A normal terminal's monospace font carries full-cell box-drawing glyphs; the
+// fallback font this widget lands on does not, so drawn as text they are the
+// wrong width and the grid breaks — dashed lines, borders that detach from the
+// box. Rendering the common box/block characters (U+2500–U+259F) as lines and
+// rects instead makes them tile perfectly and connect, at any devicePixelRatio,
+// exactly like a real terminal. Anything not covered here still falls back to
+// the font, so no glyph is ever dropped.
+
+// Stem weight per side: 0 none, 1 light, 2 heavy, 3 double.
+struct BoxStem {
+    int up, down, left, right;
+    bool rounded;
+};
+
+bool boxStem(char32_t ch, BoxStem* s) {
+    switch (ch) {
+        case 0x2500: *s = {0, 0, 1, 1, false}; return true;  // ─
+        case 0x2502: *s = {1, 1, 0, 0, false}; return true;  // │
+        case 0x250C: *s = {0, 1, 0, 1, false}; return true;  // ┌
+        case 0x2510: *s = {0, 1, 1, 0, false}; return true;  // ┐
+        case 0x2514: *s = {1, 0, 0, 1, false}; return true;  // └
+        case 0x2518: *s = {1, 0, 1, 0, false}; return true;  // ┘
+        case 0x251C: *s = {1, 1, 0, 1, false}; return true;  // ├
+        case 0x2524: *s = {1, 1, 1, 0, false}; return true;  // ┤
+        case 0x252C: *s = {0, 1, 1, 1, false}; return true;  // ┬
+        case 0x2534: *s = {1, 0, 1, 1, false}; return true;  // ┴
+        case 0x253C: *s = {1, 1, 1, 1, false}; return true;  // ┼
+        case 0x256D: *s = {0, 1, 0, 1, true};  return true;  // ╭
+        case 0x256E: *s = {0, 1, 1, 0, true};  return true;  // ╮
+        case 0x256F: *s = {1, 0, 1, 0, true};  return true;  // ╯
+        case 0x2570: *s = {1, 0, 0, 1, true};  return true;  // ╰
+        case 0x2501: *s = {0, 0, 2, 2, false}; return true;  // ━
+        case 0x2503: *s = {2, 2, 0, 0, false}; return true;  // ┃
+        case 0x250F: *s = {0, 2, 0, 2, false}; return true;  // ┏
+        case 0x2513: *s = {0, 2, 2, 0, false}; return true;  // ┓
+        case 0x2517: *s = {2, 0, 0, 2, false}; return true;  // ┗
+        case 0x251B: *s = {2, 0, 2, 0, false}; return true;  // ┛
+        case 0x2523: *s = {2, 2, 0, 2, false}; return true;  // ┣
+        case 0x252B: *s = {2, 2, 2, 0, false}; return true;  // ┫
+        case 0x2533: *s = {0, 2, 2, 2, false}; return true;  // ┳
+        case 0x253B: *s = {2, 0, 2, 2, false}; return true;  // ┻
+        case 0x254B: *s = {2, 2, 2, 2, false}; return true;  // ╋
+        case 0x2550: *s = {0, 0, 3, 3, false}; return true;  // ═
+        case 0x2551: *s = {3, 3, 0, 0, false}; return true;  // ║
+        case 0x2554: *s = {0, 3, 0, 3, false}; return true;  // ╔
+        case 0x2557: *s = {0, 3, 3, 0, false}; return true;  // ╗
+        case 0x255A: *s = {3, 0, 0, 3, false}; return true;  // ╚
+        case 0x255D: *s = {3, 0, 3, 0, false}; return true;  // ╝
+        case 0x2560: *s = {3, 3, 0, 3, false}; return true;  // ╠
+        case 0x2563: *s = {3, 3, 3, 0, false}; return true;  // ╣
+        case 0x2566: *s = {0, 3, 3, 3, false}; return true;  // ╦
+        case 0x2569: *s = {3, 0, 3, 3, false}; return true;  // ╩
+        case 0x256C: *s = {3, 3, 3, 3, false}; return true;  // ╬
+    }
+    return false;
+}
+
+bool boxIsBlock(char32_t ch) { return ch >= 0x2580 && ch <= 0x2593; }
+
+bool boxHandled(char32_t ch) {
+    BoxStem s;
+    return boxStem(ch, &s) || boxIsBlock(ch);
+}
+
+void drawBoxGlyph(QPainter& p, char32_t ch, const QRectF& r, const QColor& col) {
+    p.save();
+    if (boxIsBlock(ch)) {
+        QColor c = col;
+        const qreal hw = r.width() / 2.0, hh = r.height() / 2.0;
+        switch (ch) {
+            case 0x2588: p.fillRect(r, c); break;                                          // █
+            case 0x2580: p.fillRect(QRectF(r.left(), r.top(), r.width(), hh), c); break;   // ▀
+            case 0x2584: p.fillRect(QRectF(r.left(), r.top() + hh, r.width(), hh), c); break;  // ▄
+            case 0x258C: p.fillRect(QRectF(r.left(), r.top(), hw, r.height()), c); break;  // ▌
+            case 0x2590: p.fillRect(QRectF(r.left() + hw, r.top(), hw, r.height()), c); break;  // ▐
+            case 0x2591: c.setAlphaF(0.25f); p.fillRect(r, c); break;                      // ░
+            case 0x2592: c.setAlphaF(0.5f);  p.fillRect(r, c); break;                      // ▒
+            case 0x2593: c.setAlphaF(0.75f); p.fillRect(r, c); break;                      // ▓
+            default:     p.fillRect(r, c); break;
+        }
+        p.restore();
+        return;
+    }
+
+    BoxStem s;
+    if (!boxStem(ch, &s)) {
+        p.restore();
+        return;
+    }
+
+    const qreal midx = r.center().x(), midy = r.center().y();
+    const qreal lightW = std::max(1.0, r.height() / 16.0);
+    const qreal heavyW = std::max(2.0, r.height() / 8.0);
+    const qreal sep = std::max(1.0, r.height() / 12.0);  // double-line half-separation
+
+    if (s.rounded) {
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(col, lightW);
+        pen.setCapStyle(Qt::FlatCap);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        const qreal rad = std::min(r.width(), r.height()) / 2.0;
+        QPainterPath path;
+        if (s.down && s.right) {  // ╭
+            path.moveTo(midx, r.bottom());
+            path.lineTo(midx, midy + rad);
+            path.arcTo(QRectF(midx, midy, 2 * rad, 2 * rad), 180, -90);
+            path.lineTo(r.right(), midy);
+        } else if (s.down && s.left) {  // ╮
+            path.moveTo(midx, r.bottom());
+            path.lineTo(midx, midy + rad);
+            path.arcTo(QRectF(midx - 2 * rad, midy, 2 * rad, 2 * rad), 0, 90);
+            path.lineTo(r.left(), midy);
+        } else if (s.up && s.left) {  // ╯
+            path.moveTo(midx, r.top());
+            path.lineTo(midx, midy - rad);
+            path.arcTo(QRectF(midx - 2 * rad, midy - 2 * rad, 2 * rad, 2 * rad), 0, -90);
+            path.lineTo(r.left(), midy);
+        } else {  // ╰ (up && right)
+            path.moveTo(midx, r.top());
+            path.lineTo(midx, midy - rad);
+            path.arcTo(QRectF(midx, midy - 2 * rad, 2 * rad, 2 * rad), 180, 90);
+            path.lineTo(r.right(), midy);
+        }
+        p.drawPath(path);
+        p.restore();
+        return;
+    }
+
+    p.setRenderHint(QPainter::Antialiasing, false);
+    auto stem = [&](int w, qreal ex, qreal ey, bool horiz) {
+        if (w == 0) return;
+        if (w == 3) {  // double — two parallels, drawn a touch past centre so they meet
+            QPen pen(col, lightW);
+            p.setPen(pen);
+            if (horiz) {
+                p.drawLine(QPointF(midx, midy - sep), QPointF(ex, midy - sep));
+                p.drawLine(QPointF(midx, midy + sep), QPointF(ex, midy + sep));
+            } else {
+                p.drawLine(QPointF(midx - sep, midy), QPointF(midx - sep, ey));
+                p.drawLine(QPointF(midx + sep, midy), QPointF(midx + sep, ey));
+            }
+            return;
+        }
+        QPen pen(col, w == 2 ? heavyW : lightW);
+        p.setPen(pen);
+        if (horiz)
+            p.drawLine(QPointF(midx, midy), QPointF(ex, midy));
+        else
+            p.drawLine(QPointF(midx, midy), QPointF(midx, ey));
+    };
+    stem(s.left, r.left(), 0, true);
+    stem(s.right, r.right(), 0, true);
+    stem(s.up, 0, r.top(), false);
+    stem(s.down, 0, r.bottom(), false);
+    p.restore();
+}
 
 }  // namespace
 
@@ -280,9 +440,32 @@ void TerminalWidget::paintEvent(QPaintEvent* e) {
                 const bool ital = base.attrs & AttrItalic;
                 p.setFont(bold ? (ital ? fontBoldItalic_ : fontBold_)
                                : (ital ? fontItalic_ : font_));
-                p.setPen(sel ? defBg_ : fgOf(base));
+                const QColor fg = sel ? defBg_ : fgOf(base);
+                p.setPen(fg);
                 if (base.attrs & AttrDim) p.setOpacity(0.6);
-                p.drawText(QPointF(c * cellW_, y + baseline_), run);
+
+                // Box-drawing / block cells are painted as vector primitives so they
+                // tile and connect like a real terminal; the rest is coalesced back
+                // into one drawText per contiguous stretch (keeps a firehose fast).
+                for (int i = c; i < c2;) {
+                    const char32_t ch = (i < len) ? row[i].ch : U' ';
+                    if (boxHandled(ch)) {
+                        drawBoxGlyph(p, ch, QRectF(i * cellW_, y, cellW_, cellH_), fg);
+                        ++i;
+                    } else {
+                        int j = i;
+                        QString text;
+                        while (j < c2) {
+                            const char32_t cj = (j < len) ? row[j].ch : U' ';
+                            if (boxHandled(cj)) break;
+                            text.append(j < len ? QString::fromUcs4(&row[j].ch, 1)
+                                                : QStringLiteral(" "));
+                            ++j;
+                        }
+                        p.drawText(QPointF(i * cellW_, y + baseline_), text);
+                        i = j;
+                    }
+                }
                 p.setOpacity(1.0);
                 if (base.attrs & AttrUnderline) {
                     const qreal uy = y + cellH_ - 1.5;
