@@ -115,6 +115,13 @@ public:
         view_->setUrl(QUrl(QStringLiteral("https://duckduckgo.com")));
     }
 
+    // Session persistence: reopen on the page you left. url_ tracks the live URL.
+    QJsonObject snapshot() const { return QJsonObject{{"url", url_->text()}}; }
+    void restoreFrom(const QJsonObject& o) {
+        const QString u = o.value(QStringLiteral("url")).toString();
+        if (!u.trimmed().isEmpty()) navigate(u);
+    }
+
 private:
     void navigate(const QString& text) {
         const QUrl u = toUrl(text);
@@ -175,6 +182,13 @@ public:
         view_->setHtml(tr("<h3>Reader</h3><p>Type a URL above. This build has no "
                           "QtWebEngine, so this is a JavaScript-free reader. Install "
                           "qt6-webengine-dev and rebuild for the full browser.</p>"));
+    }
+
+    // Session persistence: reopen on the page you left (reader variant).
+    QJsonObject snapshot() const { return QJsonObject{{"url", url_->text()}}; }
+    void restoreFrom(const QJsonObject& o) {
+        const QString u = o.value(QStringLiteral("url")).toString();
+        if (!u.trimmed().isEmpty()) navigate(toUrl(u), true);
     }
 
 private:
@@ -261,6 +275,14 @@ PaneSpec makeBrowserPaneSpec() {
     s.group = QStringLiteral("Views");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new BrowserWidget(host); };
+    // static_cast: called only on a widget this spec's own factory built. Resolves
+    // to whichever BrowserWidget variant (WebEngine / reader) this build compiled.
+    s.snapshot = [](QWidget* w) -> QJsonObject {
+        return static_cast<BrowserWidget*>(w)->snapshot();
+    };
+    s.restore = [](QWidget* w, const QJsonObject& o) {
+        static_cast<BrowserWidget*>(w)->restoreFrom(o);
+    };
     return s;
 }
 

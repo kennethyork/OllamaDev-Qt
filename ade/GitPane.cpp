@@ -290,6 +290,16 @@ public:
         connect(timer_, &QTimer::timeout, this, [this] { refresh(); });
     }
 
+    // Session persistence: the repo view is all live git state, but a half-written
+    // commit message is real work — carry that draft across restarts.
+    QJsonObject snapshot() const {
+        const QString draft = message_->toPlainText();
+        return draft.isEmpty() ? QJsonObject() : QJsonObject{{"commitMsg", draft}};
+    }
+    void restoreFrom(const QJsonObject& o) {
+        message_->setPlainText(o.value(QStringLiteral("commitMsg")).toString());
+    }
+
 protected:
     void showEvent(QShowEvent* e) override {
         QWidget::showEvent(e);
@@ -1099,6 +1109,11 @@ PaneSpec makeGitPaneSpec() {
     s.group = QStringLiteral("Tools");
     s.singleton = true;
     s.factory = [](PaneHost& h) -> QWidget* { return new GitWidget(h); };
+    // static_cast: called only on a widget this spec's own factory built.
+    s.snapshot = [](QWidget* w) -> QJsonObject { return static_cast<GitWidget*>(w)->snapshot(); };
+    s.restore = [](QWidget* w, const QJsonObject& o) {
+        static_cast<GitWidget*>(w)->restoreFrom(o);
+    };
     return s;
 }
 
