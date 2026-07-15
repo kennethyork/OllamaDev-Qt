@@ -65,12 +65,14 @@ void VtParser::resize(int cols, int rows) {
     const QVector<Cell> oldPri = pri_, oldAlt = altScr_;
     const bool had = !oldPri.isEmpty();
 
-    // Anchor to the BOTTOM when shrinking: the prompt lives at the cursor, and
-    // dropping the rows below it (what a naive top-left copy does) would throw away
-    // the only part of the screen the user is looking at. Rows pushed off the top go
-    // to scrollback, exactly as if the shell had scrolled them.
+    // Anchor to the cursor when shrinking: the prompt lives at the cursor, so keep
+    // it visible. Drop ONLY as many top rows as needed to fit the cursor in the new
+    // height — max(0, cy_ - (rows-1)) — not min(orows-rows, cy_), which over-drops
+    // whenever the cursor sits above blank space (e.g. a maximised pane collapsing
+    // back down) and needlessly shoves still-fitting content (a banner) into
+    // scrollback. Rows genuinely pushed off the top go to scrollback, as if scrolled.
     int drop = 0;
-    if (had && rows < orows) drop = std::min(orows - rows, cy_);
+    if (had && rows < orows) drop = std::max(0, cy_ - (rows - 1));
 
     QVector<Cell> np(cols * rows), na(cols * rows);
     if (had) {
