@@ -278,11 +278,49 @@ void TerminalWidget::paintEvent(QPaintEvent* e) {
             if (!run.trimmed().isEmpty()) {
                 const bool bold = base.attrs & AttrBold;
                 const bool ital = base.attrs & AttrItalic;
-                p.setFont(bold ? (ital ? fontBoldItalic_ : fontBold_)
-                               : (ital ? fontItalic_ : font_));
+                const QFont& f = bold ? (ital ? fontBoldItalic_ : fontBold_)
+                                      : (ital ? fontItalic_ : font_);
+                p.setFont(f);
                 p.setPen(sel ? defBg_ : fgOf(base));
                 if (base.attrs & AttrDim) p.setOpacity(0.6);
-                p.drawText(QPointF(c * cellW_, y + baseline_), run);
+
+                // ASCII in a monospace font advances exactly one cell per glyph, so
+                // the whole run goes out in one call — fast, and already grid-aligned.
+                // A run with any non-ASCII glyph (box drawing, powerline, CJK) may
+                // carry a glyph whose advance != cellW_; drawn as one string that
+                // drift accumulates and the grid breaks — dashed box lines, borders
+                // that detach. Draw those cell by cell, each snapped to its column,
+                // and stretch a glyph narrower than the cell to fill it so box-drawing
+                // lines connect instead of leaving gaps.
+                bool ascii = true;
+                for (int i = c; i < c2; ++i)
+                    if (i < len && row[i].ch > 0x7E) {
+                        ascii = false;
+                        break;
+                    }
+
+                if (ascii) {
+                    p.drawText(QPointF(c * cellW_, y + baseline_), run);
+                } else {
+                    const QFontMetricsF fm(f);
+                    for (int i = c; i < c2; ++i) {
+                        if (i >= len || row[i].ch == U' ' || row[i].ch == 0) continue;
+                        const QString g = QString::fromUcs4(&row[i].ch, 1);
+                        const qreal adv = fm.horizontalAdvance(g);
+                        const qreal x = i * cellW_;
+                        if (adv > 0.5 && adv < cellW_ - 0.5) {
+                            // Narrower than a cell (box drawing, thin symbols): stretch
+                            // horizontally to fill the cell so adjacent glyphs tile.
+                            p.save();
+                            p.translate(x, 0);
+                            p.scale(cellW_ / adv, 1.0);
+                            p.drawText(QPointF(0, y + baseline_), g);
+                            p.restore();
+                        } else {
+                            p.drawText(QPointF(x, y + baseline_), g);
+                        }
+                    }
+                }
                 p.setOpacity(1.0);
                 if (base.attrs & AttrUnderline) {
                     const qreal uy = y + cellH_ - 1.5;
