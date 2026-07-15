@@ -66,6 +66,24 @@ namespace {
 // round-trips through the other.
 QString viewPaneId(const QString& view) { return QStringLiteral("__pop_%1__").arg(view); }
 
+// The four views built into MainWindow (their own ensure* helpers, not the
+// registry). They stay in the PHP-compatible `panes` map; every other canvas
+// pane is a registry pane persisted in `extraPanes`.
+bool isBuiltinView(const QString& kind) {
+    return kind == QLatin1String("board") || kind == QLatin1String("editor") ||
+           kind == QLatin1String("files") || kind == QLatin1String("settings");
+}
+
+// The registry kind behind a pane id: "__pop_<kind>__" for a singleton, or
+// "<kind>_<seq>" for a stacked one (kinds use '-', never '_', so the last '_'
+// splits kind from sequence).
+QString paneKindFromId(const QString& id) {
+    if (id.startsWith(QLatin1String("__pop_")) && id.endsWith(QLatin1String("__")))
+        return id.mid(6, id.size() - 8);
+    const int u = id.lastIndexOf(QLatin1Char('_'));
+    return u > 0 ? id.left(u) : id;
+}
+
 QRectF geomFromJson(const QJsonObject& o) {
     if (!o.contains("w")) return QRectF();
     return QRectF(o.value("x").toDouble(), o.value("y").toDouble(), o.value("w").toDouble(),
@@ -384,14 +402,20 @@ void MainWindow::addPaneOfKind(const QString& kind) {
         // A registered pane. Singletons re-raise; the rest stack up.
         const QString id = spec->singleton ? viewPaneId(kind)
                                             : QStringLiteral("%1_%2").arg(kind).arg(++termSeq_);
-        if (spec->singleton) {
-            if (Pane* p = canvas_->pane(id)) {
-                canvas_->raisePane(p);
-                return;
-            }
-        }
-        if (QWidget* w = spec->factory(*this)) canvas_->addPane(id, spec->title, w, QRectF());
+        addRegistryPane(*spec, id, QRectF());
     }
+}
+
+Pane* MainWindow::addRegistryPane(const PaneSpec& spec, const QString& id, const QRectF& geom) {
+    // An id already on the canvas (a singleton, or a restore that ran twice) is
+    // re-raised rather than duplicated.
+    if (Pane* p = canvas_->pane(id)) {
+        canvas_->raisePane(p);
+        return p;
+    }
+    QWidget* w = spec.factory(*this);
+    if (!w) return nullptr;
+    return canvas_->addPane(id, spec.title, w, geom);
 }
 
 // ---- panes -----------------------------------------------------------------
@@ -711,6 +735,7 @@ QJsonObject MainWindow::captureState() const {
 
     QJsonArray terms;
     QJsonObject panes;
+    QJsonArray extras;
     for (Pane* p : canvas_->panes()) {
         const QString id = p->id();
         // For the maximised pane, persist the geometry it un-maximises TO, not its
@@ -718,26 +743,45 @@ QJsonObject MainWindow::captureState() const {
         // full-size rect and the original size/position is lost forever.
         const QRectF g =
             id == canvas_->maximisedId() ? canvas_->preMaximiseGeom() : p->geometryF();
-        if (id.startsWith(QLatin1String("__pop_"))) {
-            const QString view = id.mid(6, id.size() - 8);  // __pop_<view>__
-            panes.insert(view, geomToJson(g));
+
+        if (auto* term = qobject_cast<TerminalWidget*>(p->content())) {
+            QJsonObject t = geomToJson(g);
+            t.insert("id", id);
+            t.insert("kind", term->property("odvKind").toString());
+            t.insert("cwd", term->property("odvCwd").toString());
+            t.insert("backend", QStringLiteral("ollama"));
+            t.insert("model", models_ ? models_->currentText() : QString());
+            t.insert("z", p->zValue());
+            t.insert("replay", term->snapshot());
+            terms.append(t);
             continue;
         }
-        auto* term = qobject_cast<TerminalWidget*>(p->content());
-        if (!term) continue;
-        QJsonObject t = geomToJson(g);
-        t.insert("id", id);
-        t.insert("kind", term->property("odvKind").toString());
-        t.insert("cwd", term->property("odvCwd").toString());
-        t.insert("backend", QStringLiteral("ollama"));
-        t.insert("model", models_ ? models_->currentText() : QString());
-        t.insert("z", p->zValue());
-        t.insert("replay", term->snapshot());
-        terms.append(t);
+
+        // The four built-in views keep the PHP-compatible `panes` map.
+        if (id.startsWith(QLatin1String("__pop_"))) {
+            const QString view = id.mid(6, id.size() - 8);  // __pop_<view>__
+            if (isBuiltinView(view)) {
+                panes.insert(view, geomToJson(g));
+                continue;
+            }
+        }
+
+        // Everything else is a registry pane. Reopen it next session at its geometry
+        // and z, with its inner content when the spec knows how to snapshot it.
+        const QString kind = paneKindFromId(id);
+        if (const PaneSpec* spec = PaneRegistry::instance().find(kind)) {
+            QJsonObject o = geomToJson(g);
+            o.insert("kind", kind);
+            o.insert("id", id);
+            o.insert("z", p->zValue());
+            if (spec->snapshot) o.insert("content", spec->snapshot(p->content()));
+            extras.append(o);
+        }
     }
 
     state.insert("terminals", terms);
     state.insert("panes", panes);
+    state.insert("extraPanes", extras);
     state.insert("editorTabs", editor_ ? editor_->snapshot() : QJsonArray());
     // The PHP app reads pan.x / pan.y and ignores anything else in the object, so
     // carrying the zoom here keeps one schema for both.
@@ -752,7 +796,8 @@ void MainWindow::restoreState(const QJsonObject& state) {
     restoring_ = true;
 
     const QJsonObject panes = state.value("panes").toObject();
-    if (panes.isEmpty() && state.value("terminals").toArray().isEmpty()) {
+    const QJsonArray extras = state.value("extraPanes").toArray();
+    if (panes.isEmpty() && state.value("terminals").toArray().isEmpty() && extras.isEmpty()) {
         // First run in this project: open a real workbench, not an empty board.
         ensureFiles(QRectF(16, 16, 320, 520));
         ensureEditor(QRectF(356, 16, 700, 520));
@@ -787,6 +832,26 @@ void MainWindow::restoreState(const QJsonObject& state) {
                               t.value("cwd").toString(project_), t.value("replay").toString(),
                               geomFromJson(t));
         if (p && t.contains("z")) p->setZValue(t.value("z").toDouble());
+    }
+
+    // Every other canvas pane (chat, git, graph, tasks, …). Reopened via the
+    // registry, before pan/zoom so a maximised one can still be re-focused below.
+    for (const QJsonValue& v : extras) {
+        const QJsonObject o = v.toObject();
+        const QString kind = o.value("kind").toString();
+        const PaneSpec* spec = PaneRegistry::instance().find(kind);
+        if (!spec) continue;  // a pane kind this build no longer ships
+        const QString id = o.value("id").toString(viewPaneId(kind));
+        Pane* p = addRegistryPane(*spec, id, geomFromJson(o));
+        if (!p) continue;
+        if (o.contains("z")) p->setZValue(o.value("z").toDouble());
+        if (spec->restore && o.contains("content"))
+            spec->restore(p->content(), o.value("content").toObject());
+        // Stacked panes share termSeq_ with terminals; keep it ahead of restored ids.
+        if (!spec->singleton) {
+            const int seq = id.mid(kind.size() + 1).toInt();
+            if (seq > termSeq_) termSeq_ = seq;
+        }
     }
 
     const QJsonObject pan = state.value("pan").toObject();

@@ -13,10 +13,12 @@
 #include <QCheckBox>
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
 #include <QVBoxLayout>
 
 #include "Backend.h"
@@ -91,6 +93,25 @@ public:
         prompt_->installEventFilter(this);
     }
 
+    // Session persistence: the draft prompt and which installed providers are
+    // ticked. Boxes for providers that aren't installed stay disabled regardless.
+    QJsonObject snapshot() const {
+        QJsonArray checked;
+        for (QCheckBox* cb : boxes_)
+            if (cb->isChecked()) checked.append(cb->property("backendId").toString());
+        return QJsonObject{{"prompt", prompt_->toPlainText()}, {"providers", checked}};
+    }
+    void restoreFrom(const QJsonObject& o) {
+        prompt_->setPlainText(o.value(QStringLiteral("prompt")).toString());
+        if (!o.contains(QStringLiteral("providers"))) return;  // keep the sensible default ticks
+        QSet<QString> want;
+        for (const QJsonValue& v : o.value(QStringLiteral("providers")).toArray())
+            want.insert(v.toString());
+        for (QCheckBox* cb : boxes_)
+            if (cb->isEnabled())
+                cb->setChecked(want.contains(cb->property("backendId").toString()));
+    }
+
 protected:
     bool eventFilter(QObject* o, QEvent* e) override {
         if (o == prompt_ && e->type() == QEvent::KeyPress) {
@@ -142,6 +163,13 @@ PaneSpec makeAgentTeamPaneSpec() {
     s.group = QStringLiteral("Crew");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new AgentTeamWidget(host); };
+    // static_cast: called only on a widget this spec's own factory built.
+    s.snapshot = [](QWidget* w) -> QJsonObject {
+        return static_cast<AgentTeamWidget*>(w)->snapshot();
+    };
+    s.restore = [](QWidget* w, const QJsonObject& o) {
+        static_cast<AgentTeamWidget*>(w)->restoreFrom(o);
+    };
     return s;
 }
 

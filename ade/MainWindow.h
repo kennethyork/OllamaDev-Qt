@@ -76,6 +76,9 @@ private:
     Pane* ensureEditor(const QRectF& geom = QRectF());
     Pane* ensureFiles(const QRectF& geom = QRectF());
     Pane* ensureSettings(const QRectF& geom = QRectF());
+    // Build a registered pane at an explicit id + geometry (or re-raise it if the
+    // id is already on the canvas). Shared by the Add menu and session restore.
+    Pane* addRegistryPane(const struct PaneSpec& spec, const QString& id, const QRectF& geom);
     QWidget* buildSettingsWidget();
 
     void status(const QString& msg);

@@ -70,6 +70,16 @@ public:
         refreshStatus();
     }
 
+    // Session persistence: carry the last query across restarts. Results are cheap
+    // to re-derive, so restore re-runs it (async — no blocking on startup).
+    QJsonObject snapshot() const { return QJsonObject{{"query", query_->text()}}; }
+    void restoreFrom(const QJsonObject& o) {
+        const QString q = o.value(QStringLiteral("query")).toString();
+        if (q.trimmed().isEmpty()) return;
+        query_->setText(q);
+        runSearch();
+    }
+
 private:
     void refreshStatus() {
         const IndexStatus st = CodeIndex::status();
@@ -188,6 +198,13 @@ PaneSpec makeCodeSearchPaneSpec() {
     s.group = QStringLiteral("Tools");
     s.singleton = true;
     s.factory = [](PaneHost& host) -> QWidget* { return new CodeSearchWidget(host); };
+    // static_cast: called only on a widget this spec's own factory built.
+    s.snapshot = [](QWidget* w) -> QJsonObject {
+        return static_cast<CodeSearchWidget*>(w)->snapshot();
+    };
+    s.restore = [](QWidget* w, const QJsonObject& o) {
+        static_cast<CodeSearchWidget*>(w)->restoreFrom(o);
+    };
     return s;
 }
 

@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #pragma once
+#include <QJsonObject>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -27,6 +28,15 @@ struct PaneSpec {
     QString group;   // menu section: "" | "Views" | "Crew" | "Tools"
     bool singleton = true;  // true → one instance, re-raised; false → many
     std::function<QWidget*(PaneHost&)> factory;
+
+    // Optional session persistence for the pane's INNER content (a chat
+    // transcript, a search query, …). `snapshot` serialises the content widget
+    // the factory built; `restore` re-applies that blob to a freshly built one.
+    // Leave both null and the pane simply reopens fresh at its saved geometry —
+    // which is right for a live/derived view (git, graph, topology) that has no
+    // user-entered state to carry.
+    std::function<QJsonObject(QWidget*)> snapshot;
+    std::function<void(QWidget*, const QJsonObject&)> restore;
 };
 
 // Extra panes beyond the four built into MainWindow (terminal/board/editor/

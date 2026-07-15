@@ -105,6 +105,24 @@ public:
         replay();
     }
 
+    // Session persistence for the canvas: a chat pane IS its Session (already saved
+    // to disk on every message), so the snapshot is just which session to reopen,
+    // plus the chosen model. Restore reloads that transcript instead of starting a
+    // blank one.
+    QJsonObject snapshot() const {
+        return QJsonObject{{"session", session_.id()}, {"model", model_->currentText()}};
+    }
+    void restoreFrom(const QJsonObject& o) {
+        const QString mdl = o.value(QStringLiteral("model")).toString();
+        if (!mdl.isEmpty()) model_->setCurrentText(mdl);
+        const QString sid = o.value(QStringLiteral("session")).toString();
+        if (!sid.isEmpty())
+            if (auto s = Session::load(sid)) {
+                session_ = *s;
+                replay();
+            }
+    }
+
 protected:
     // Enter sends; Shift+Enter is a newline. A chat box that needs a mouse click to
     // send is a chat box nobody uses.
@@ -275,6 +293,13 @@ PaneSpec makeChatPaneSpec() {
     // arguing about an approach, one reading a stack trace.
     s.singleton = false;
     s.factory = [](PaneHost& h) -> QWidget* { return new ChatWidget(h); };
+    // static_cast, not qobject_cast: these run only on a widget THIS spec's factory
+    // built (MainWindow resolves the spec by the pane's kind), so the type is known
+    // — and the anon-namespace widget has no Q_OBJECT for qobject_cast anyway.
+    s.snapshot = [](QWidget* w) -> QJsonObject { return static_cast<ChatWidget*>(w)->snapshot(); };
+    s.restore = [](QWidget* w, const QJsonObject& o) {
+        static_cast<ChatWidget*>(w)->restoreFrom(o);
+    };
     return s;
 }
 
