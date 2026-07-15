@@ -1,50 +1,61 @@
 #!/usr/bin/env bash
-# Does the multi-agent crew actually beat a single agent? This measures it.
+# Does the multi-agent crew actually beat a single agent? This measures it — on
+# C++, because that is what this project is, and because a COMPILER is the most
+# reliable oracle there is: either the code compiles and the asserts pass, or it
+# doesn't. No test-runner, no import-style, no interpreter quirks to get wrong.
 #
-# For each task below it spins up a throwaway git repo, runs the task TWICE — once
-# with a single agent (`ollamadev "<task>"`), once with the crew (`ollamadev crew
-# "<task>"` then apply) — and checks the task's own verification command. It prints
-# a pass/fail + wall-clock table so the "crew is better" claim is a number, not a
-# vibe.
+# For each task it spins up a throwaway repo, runs the task TWICE — once with a
+# single agent (`ollamadev "<task>"`), once with the crew — then compiles a fixed
+# test harness against the agent's header and runs it. Same task, same model, same
+# oracle for both arms, so any difference is the architecture.
 #
-#   scripts/crew-benchmark.sh                 # all tasks, default model
-#   OLLAMA_MODEL=qwen2.5-coder:7b scripts/crew-benchmark.sh
+#   scripts/crew-benchmark.sh
+#   OLLAMA_MODEL=deepseek-v4-pro:cloud scripts/crew-benchmark.sh
 #
-# Needs Ollama running with a tool-capable model. With none reachable it says so
-# and exits 0 (nothing to measure) rather than reporting false failures.
+# Needs Ollama with a tool-capable model, and g++. With no model reachable it says
+# so and exits 0 rather than reporting false failures.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLI="${ODV_CLI:-$ROOT/build/cli/ollamadev}"
+CXX="${CXX:-g++}"
 [ -x "$CLI" ] || { echo "build the CLI first: cmake --build build" >&2; exit 1; }
-
-# Preflight: is a model actually reachable? If not, don't pretend to benchmark.
+command -v "$CXX" >/dev/null || { echo "need a C++ compiler ($CXX)" >&2; exit 1; }
 if ! "$CLI" models >/dev/null 2>&1; then
     echo "⚠ no Ollama/model reachable — start Ollama and pull a model, then rerun."
     exit 0
 fi
 
-# Each task: a name, the instruction, the file it should produce, and a command
-# that must exit 0 for the task to count as PASSED. Add rows freely — they are the
-# benchmark. Kept tiny and self-checking so a weak local model still has a chance.
-# The instruction is written as an unambiguous WRITE-TO-DISK task — "create a file
-# X in the current directory" — so a single agent uses its edit tool instead of
-# just explaining the code in prose. Both arms get the identical instruction, so
-# the comparison is fair: same task, same model, only the architecture differs.
+# Each task: name | instruction (an unambiguous WRITE-A-HEADER task, identical for
+# both arms) | the header file it must produce | the body of a test main() that is
+# compiled against that header and must exit 0. The instruction states the exact
+# signature so the fixed harness lines up. Add rows freely — they are the benchmark.
 TASKS=(
-  "fizzbuzz|In the current directory, create a file named fizzbuzz.py containing a function fizzbuzz(n) that returns 'Fizz','Buzz','FizzBuzz' or the number as a string. Write the file to disk.|fizzbuzz.py|python3 -c 'import fizzbuzz as f; assert f.fizzbuzz(3)==\"Fizz\" and f.fizzbuzz(5)==\"Buzz\" and f.fizzbuzz(15)==\"FizzBuzz\" and f.fizzbuzz(2)==\"2\"'"
-  "palindrome|In the current directory, create a file named pal.py containing is_pal(s) that returns True iff s reads the same forwards and backwards, ignoring case. Write the file to disk.|pal.py|python3 -c 'import pal; assert pal.is_pal(\"RaceCar\") and not pal.is_pal(\"hello\")'"
-  "wordcount|In the current directory, create a file named wc.py containing count_words(text) returning a dict of lowercased word -> count. Write the file to disk.|wc.py|python3 -c 'import wc; d=wc.count_words(\"a A b\"); assert d[\"a\"]==2 and d[\"b\"]==1'"
+  "add|In the current directory, create a C++ header file add.hpp defining a function int add(int a, int b) that returns a+b. Write the file to disk.|add.hpp|assert(add(2,3)==5); assert(add(-2,2)==0);"
+  "clamp|In the current directory, create a C++ header file clamp.hpp defining int clamp_int(int x, int lo, int hi) that returns x clamped into [lo,hi]. Write the file to disk.|clamp.hpp|assert(clamp_int(5,0,10)==5); assert(clamp_int(-3,0,10)==0); assert(clamp_int(99,0,10)==10);"
+  "palindrome|In the current directory, create a C++ header file pal.hpp that includes <string> and defines bool is_palindrome(const std::string& s), true iff s reads the same forwards and backwards. Write the file to disk.|pal.hpp|assert(is_palindrome(std::string(\"racecar\"))); assert(!is_palindrome(std::string(\"hello\")));"
 )
 
-run_one() {  # <mode> <instruction> <verify>
-    local mode="$1" instr="$2" verify="$3"
+# Compile a test main that includes the agent's header and runs the asserts.
+verify() {  # <dir> <header> <assert-body> -> 0 == pass
+    local d="$1" header="$2" body="$3"
+    [ -f "$d/$header" ] || return 1
+    {
+        printf '#include "%s"\n' "$header"
+        printf '#include <cassert>\n#include <string>\n'
+        printf 'int main(){ %s return 0; }\n' "$body"
+    } > "$d/_bench_test.cpp"
+    ( cd "$d" && "$CXX" -std=c++17 -I. _bench_test.cpp -o _bench_test ) >/dev/null 2>&1 || return 1
+    ( cd "$d" && ./_bench_test ) >/dev/null 2>&1
+}
+
+run_one() {  # <mode> <instr> <header> <body> -> "<pass|FAIL> <elapsed>s"
+    local mode="$1" instr="$2" header="$3" body="$4"
     local tmp; tmp="$(mktemp -d)"
     ( cd "$tmp" && git init -q && git commit -q --allow-empty -m init )
-    # Isolated HOME per run: with no ~/.ollamadev/workspaces.json there is no "active
-    # workspace" for the CLI to re-root into, so it stays in $tmp (its cwd) instead
-    # of hijacking to whatever project was last open. Without this the single agent
-    # silently ran in the wrong repo and every check failed.
+    # Isolated HOME: with no ~/.ollamadev/workspaces.json there is no "active
+    # workspace" for the one-shot to re-root into, so it stays in $tmp instead of
+    # hijacking to the last-open project.
     local home="$tmp/home"; mkdir -p "$home"
     local start; start="$(date +%s)"
     if [ "$mode" = single ]; then
@@ -54,24 +65,24 @@ run_one() {  # <mode> <instruction> <verify>
     fi
     local elapsed=$(( $(date +%s) - start ))
     local ok=FAIL
-    ( cd "$tmp" && bash -c "$verify" ) >/dev/null 2>&1 && ok=pass
+    verify "$tmp" "$header" "$body" && ok=pass
     rm -rf "$tmp"
     echo "$ok ${elapsed}s"
 }
 
-printf "%-14s | %-12s | %-12s\n" "task" "single" "crew"
-printf -- "---------------+--------------+-------------\n"
+printf "%-12s | %-12s | %-12s\n" "task" "single" "crew"
+printf -- "-------------+--------------+-------------\n"
 sp=0; cp=0; n=0
 for row in "${TASKS[@]}"; do
-    IFS='|' read -r name instr _file verify <<<"$row"
+    IFS='|' read -r name instr header body <<<"$row"
     n=$((n+1))
-    s="$(run_one single "$instr" "$verify")"
-    c="$(run_one crew   "$instr" "$verify")"
+    s="$(run_one single "$instr" "$header" "$body")"
+    c="$(run_one crew   "$instr" "$header" "$body")"
     [ "${s%% *}" = pass ] && sp=$((sp+1))
     [ "${c%% *}" = pass ] && cp=$((cp+1))
-    printf "%-14s | %-12s | %-12s\n" "$name" "$s" "$c"
+    printf "%-12s | %-12s | %-12s\n" "$name" "$s" "$c"
 done
-printf -- "---------------+--------------+-------------\n"
-printf "%-14s | %-12s | %-12s\n" "PASS RATE" "$sp/$n" "$cp/$n"
+printf -- "-------------+--------------+-------------\n"
+printf "%-12s | %-12s | %-12s\n" "PASS RATE" "$sp/$n" "$cp/$n"
 echo
-echo "single agent: $sp/$n   ·   crew: $cp/$n"
+echo "single agent: $sp/$n   ·   crew: $cp/$n   (oracle: g++ compile + run asserts)"
