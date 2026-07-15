@@ -7,6 +7,7 @@ qt_add_executable(ollamadev-ade
     VtParser.cpp VtParser.h
     BoardPane.cpp BoardPane.h
     EditorPane.cpp EditorPane.h
+    InlineCompleter.cpp InlineCompleter.h
     FilesPane.cpp FilesPane.h
     Theme.cpp Theme.h
     PaneHost.h

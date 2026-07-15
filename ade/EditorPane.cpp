@@ -16,14 +16,17 @@
 #include <QFontDatabase>
 #include <QJsonObject>
 #include <QMessageBox>
+#include <QKeyEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
 #include <QTabWidget>
 #include <QTextBlock>
 #include <QTextStream>
+#include <QTimer>
 #include <QVBoxLayout>
 
+#include "InlineCompleter.h"
 #include "Theme.h"
 
 namespace odv {
@@ -47,6 +50,64 @@ CodeEdit::CodeEdit(QWidget* parent) : QPlainTextEdit(parent) {
     connect(this, &QPlainTextEdit::blockCountChanged, this, &CodeEdit::updateGutterWidth);
     connect(this, &QPlainTextEdit::updateRequest, this, &CodeEdit::updateGutter);
     updateGutterWidth();
+
+    // Inline FIM completion. A short debounce means we ask only after typing pauses,
+    // not on every keystroke; a fresh edit or a cursor move drops any pending ghost.
+    completer_ = new InlineCompleter(this);
+    debounce_ = new QTimer(this);
+    debounce_->setSingleShot(true);
+    debounce_->setInterval(350);
+    connect(debounce_, &QTimer::timeout, this, &CodeEdit::requestCompletion);
+    connect(completer_, &InlineCompleter::suggestion, this, &CodeEdit::showGhost);
+    connect(this, &QPlainTextEdit::textChanged, this, [this] {
+        clearGhost();  // the buffer changed — any ghost is stale
+        if (InlineCompleter::enabled()) debounce_->start();
+    });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this] {
+        if (ghostAt_ >= 0 && textCursor().position() != ghostAt_) clearGhost();
+    });
+}
+
+void CodeEdit::requestCompletion() {
+    if (!InlineCompleter::enabled() || !hasFocus()) return;
+    QTextCursor cur = textCursor();
+    if (cur.hasSelection()) return;  // a completion mid-selection makes no sense
+    const int pos = cur.position();
+    const QString all = toPlainText();
+    // Bound the context so a huge file doesn't make each keystroke-pause slow: the
+    // model only needs the local neighbourhood to fill the hole.
+    const int prefixFrom = qMax(0, pos - 2000);
+    const int suffixTo = qMin(all.size(), pos + 1000);
+    completer_->request(all.mid(prefixFrom, pos - prefixFrom), all.mid(pos, suffixTo - pos));
+}
+
+void CodeEdit::showGhost(const QString& s) {
+    // Ignore an empty/whitespace-only suggestion, or one that raced in after the
+    // cursor moved (the position it was computed for no longer holds).
+    const QString trimmed = s.left(400);  // never draw a wall of text
+    if (trimmed.trimmed().isEmpty() || !hasFocus() || textCursor().hasSelection()) {
+        clearGhost();
+        return;
+    }
+    ghost_ = trimmed;
+    ghostAt_ = textCursor().position();
+    viewport()->update();
+}
+
+void CodeEdit::clearGhost() {
+    if (ghostAt_ < 0 && ghost_.isEmpty()) return;
+    ghost_.clear();
+    ghostAt_ = -1;
+    viewport()->update();
+}
+
+void CodeEdit::acceptGhost() {
+    if (ghost_.isEmpty()) return;
+    const QString text = ghost_;
+    clearGhost();
+    QTextCursor cur = textCursor();
+    cur.insertText(text);  // one undo step, and it lands as a normal edit (marks dirty)
+    setTextCursor(cur);
 }
 
 int CodeEdit::gutterWidth() const {
@@ -67,6 +128,46 @@ void CodeEdit::resizeEvent(QResizeEvent* e) {
     QPlainTextEdit::resizeEvent(e);
     const QRect cr = contentsRect();
     gutter_->setGeometry(QRect(cr.left(), cr.top(), gutterWidth(), cr.height()));
+}
+
+void CodeEdit::paintEvent(QPaintEvent* e) {
+    QPlainTextEdit::paintEvent(e);
+    if (ghost_.isEmpty() || ghostAt_ < 0 || textCursor().position() != ghostAt_) return;
+
+    QPainter p(viewport());
+    p.setFont(font());
+    p.setPen(Theme::currentColors().faint);  // a muted hint, clearly not real text
+    const QRect cr = cursorRect();
+    const int lineH = fontMetrics().height();
+    const int contLeft = qRound(contentOffset().x() + document()->documentMargin());
+    const QStringList lines = ghost_.split(QLatin1Char('\n'));
+    for (int i = 0; i < lines.size(); ++i) {
+        const int x = i == 0 ? cr.left() : contLeft;
+        const int y = cr.top() + i * lineH + fontMetrics().ascent();
+        p.drawText(x, y, lines.at(i));
+    }
+}
+
+void CodeEdit::keyPressEvent(QKeyEvent* e) {
+    if (ghostAt_ >= 0 && !ghost_.isEmpty()) {
+        if (e->key() == Qt::Key_Tab) {  // Tab accepts the whole suggestion
+            acceptGhost();
+            e->accept();
+            return;
+        }
+        if (e->key() == Qt::Key_Escape) {  // Esc dismisses it
+            clearGhost();
+            e->accept();
+            return;
+        }
+        // Any other key edits the buffer — textChanged will drop the stale ghost.
+    }
+    QPlainTextEdit::keyPressEvent(e);
+}
+
+void CodeEdit::focusOutEvent(QFocusEvent* e) {
+    clearGhost();
+    QPlainTextEdit::focusOutEvent(e);
 }
 
 void CodeEdit::paintGutter(QPaintEvent* e) {

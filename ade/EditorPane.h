@@ -15,8 +15,11 @@
 #include <QWidget>
 
 class QTabWidget;
+class QTimer;
 
 namespace odv {
+
+class InlineCompleter;
 
 // Gutter for CodeEdit. A plain QWidget whose paint is delegated back to the
 // editor, which is the only thing that knows the block geometry.
@@ -50,13 +53,27 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
+    // Inline FIM completion: draw the ghost after the real text, accept it on Tab.
+    void paintEvent(QPaintEvent* e) override;
+    void keyPressEvent(QKeyEvent* e) override;
+    void focusOutEvent(QFocusEvent* e) override;
 
 private slots:
     void updateGutterWidth();
     void updateGutter(const QRect& r, int dy);
 
 private:
+    void requestCompletion();          // debounced ask for a suggestion at the cursor
+    void showGhost(const QString& s);  // a suggestion arrived
+    void clearGhost();                 // it went stale (edit, move, blur, accept)
+    void acceptGhost();                // Tab: splice the suggestion into the buffer
+
     LineGutter* gutter_;
+
+    InlineCompleter* completer_ = nullptr;
+    QTimer* debounce_ = nullptr;
+    QString ghost_;       // the pending suggestion, drawn but not yet in the document
+    int ghostAt_ = -1;    // cursor position the ghost belongs to; -1 == no ghost
 };
 
 // Tabbed plain-text editor. Ctrl+S saves; a dirty tab carries a • in its label
