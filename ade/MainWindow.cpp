@@ -842,17 +842,22 @@ void MainWindow::restoreState(const QJsonObject& state) {
 
     for (const QJsonValue& v : state.value("terminals").toArray()) {
         const QJsonObject t = v.toObject();
+        const QString kind = t.value("kind").toString();
+        const bool isCli = !kind.isEmpty() && kind != QLatin1String("shell");
+
+        // A CLI pane relaunches its REPL below, and the REPL auto-resumes this
+        // folder's session — so replaying its old scrollback would only paint stale,
+        // wrong-width output (box frames, an old prompt) that then overlaps the fresh
+        // CLI and looks garbled. Don't replay it for CLIs; a plain shell keeps its
+        // scrollback.
         Pane* p = addTerminal(t.value("id").toString(QStringLiteral("term_%1").arg(++termSeq_)),
-                              t.value("cwd").toString(project_), t.value("replay").toString(),
-                              geomFromJson(t));
+                              t.value("cwd").toString(project_),
+                              isCli ? QString() : t.value("replay").toString(), geomFromJson(t));
         if (p && t.contains("z")) p->setZValue(t.value("z").toDouble());
 
         // A CLI pane (a terminal that was running ollamadev/claude/…) comes back as
-        // that CLI, not a bare shell: relaunch its REPL just like addCliTerminal, and
-        // — because the CLI now auto-resumes this folder's session — it picks the
-        // conversation back up. The old scrollback stays painted above as history.
-        const QString kind = t.value("kind").toString();
-        if (p && !kind.isEmpty() && kind != QLatin1String("shell")) {
+        // that CLI, not a bare shell: relaunch its REPL just like addCliTerminal.
+        if (p && isCli) {
             if (auto* term = qobject_cast<TerminalWidget*>(p->content())) {
                 term->setProperty("odvKind", kind);
                 p->setTitle(kind);
