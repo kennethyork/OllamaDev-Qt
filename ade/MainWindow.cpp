@@ -472,7 +472,9 @@ Pane* MainWindow::addCliTerminal(const QString& cliId) {
     p->setTitle(cliId);
     // For our own REPL, launch the C++ binary this app ships — not a stale PHP
     // `ollamadev` on PATH. Other CLIs are external and launch by their own name.
-    term->sendText(withOdvCli(cliId) + QLatin1Char('\n'));
+    // `clear;` wipes the shell greeting and the echoed (long, ugly, wrapped) launch
+    // command so the pane opens straight onto the CLI, not the path we typed to run it.
+    term->sendText(QStringLiteral("clear; ") + withOdvCli(cliId) + QLatin1Char('\n'));
     return p;
 }
 
@@ -854,7 +856,7 @@ void MainWindow::restoreState(const QJsonObject& state) {
             if (auto* term = qobject_cast<TerminalWidget*>(p->content())) {
                 term->setProperty("odvKind", kind);
                 p->setTitle(kind);
-                term->sendText(withOdvCli(kind) + QLatin1Char('\n'));
+                term->sendText(QStringLiteral("clear; ") + withOdvCli(kind) + QLatin1Char('\n'));
             }
         }
     }
