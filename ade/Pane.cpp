@@ -81,7 +81,20 @@ QRectF Pane::gripRect() const {
 void Pane::layoutContent() {
     if (!proxy_) return;
     const qreal w = size().width(), h = size().height();
-    proxy_->setGeometry(QRectF(1, kHeadH, qMax(0.0, w - 2), qMax(0.0, h - kHeadH - 1)));
+    // Leave a kEdge margin on the right and bottom so that border belongs to the
+    // pane, not the content proxy — otherwise the content grabs the mouse press and
+    // the resize grip/edges never fire.
+    proxy_->setGeometry(
+        QRectF(1, kHeadH, qMax(0.0, w - 1 - kEdge), qMax(0.0, h - kHeadH - kEdge)));
+}
+
+int Pane::resizeEdgeAt(const QPointF& pos) const {
+    if (pos.y() <= kHeadH) return 0;  // the header is a move zone, never a resize one
+    if (gripRect().contains(pos)) return 3;  // the corner grip resizes both (diagonal)
+    int e = 0;
+    if (pos.x() >= size().width() - kEdge) e |= 1;   // right edge
+    if (pos.y() >= size().height() - kEdge) e |= 2;  // bottom edge
+    return e;
 }
 
 void Pane::resizeEvent(QGraphicsSceneResizeEvent* e) {
@@ -154,8 +167,9 @@ void Pane::mousePressEvent(QGraphicsSceneMouseEvent* e) {
         emit focusToggleRequested();
         return;
     }
-    if (gripRect().contains(pos)) {
+    if (int edges = resizeEdgeAt(pos)) {
         drag_ = Drag::Resize;
+        resizeEdges_ = edges;
         dragOrigin_ = e->scenePos();
         dragGeom_ = geometry();
         e->accept();
@@ -182,8 +196,9 @@ void Pane::mouseMoveEvent(QGraphicsSceneMouseEvent* e) {
     if (drag_ == Drag::Move) {
         setGeometry(QRectF(dragGeom_.topLeft() + d, dragGeom_.size()));
     } else {
-        setGeometryF(QRectF(dragGeom_.topLeft(),
-                            QSizeF(dragGeom_.width() + d.x(), dragGeom_.height() + d.y())));
+        const qreal nw = (resizeEdges_ & 1) ? dragGeom_.width() + d.x() : dragGeom_.width();
+        const qreal nh = (resizeEdges_ & 2) ? dragGeom_.height() + d.y() : dragGeom_.height();
+        setGeometryF(QRectF(dragGeom_.topLeft(), QSizeF(nw, nh)));
     }
     e->accept();
 }
@@ -211,12 +226,15 @@ void Pane::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* e) {
 void Pane::hoverMoveEvent(QGraphicsSceneHoverEvent* e) {
     const QPointF pos = e->pos();
     const int was = hover_;
+    const int edges = resizeEdgeAt(pos);
     hover_ = closeRect().contains(pos)  ? 1
              : zoomRect().contains(pos) ? 2
-             : gripRect().contains(pos) ? 3
+             : edges                    ? 3
                                         : 0;
-    if (hover_ == 3) setCursor(Qt::SizeFDiagCursor);
-    else if (hover_ == 0 && headRect().contains(pos)) setCursor(Qt::SizeAllCursor);
+    if (edges == 3) setCursor(Qt::SizeFDiagCursor);
+    else if (edges == 1) setCursor(Qt::SizeHorCursor);
+    else if (edges == 2) setCursor(Qt::SizeVerCursor);
+    else if (headRect().contains(pos)) setCursor(Qt::SizeAllCursor);
     else setCursor(Qt::ArrowCursor);
     if (hover_ != was) update();
     QGraphicsWidget::hoverMoveEvent(e);

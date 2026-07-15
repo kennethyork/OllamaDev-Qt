@@ -40,6 +40,7 @@ public:
     static constexpr qreal kGrip = 16.0;
     static constexpr qreal kMinW = 240.0;  // same floor as the PHP canvas
     static constexpr qreal kMinH = 130.0;
+    static constexpr qreal kEdge = 7.0;    // resize border along the right/bottom edges
 
     // Takes ownership of `content` (via the proxy).
     Pane(const QString& id, const QString& title, QWidget* content,
@@ -81,6 +82,10 @@ private:
     QRectF closeRect() const;
     QRectF zoomRect() const;
     QRectF gripRect() const;
+    // Which resize edges the point sits on: bit 1 = right, bit 2 = bottom (3 = the
+    // corner). 0 means no resize zone. The content proxy is inset by kEdge so these
+    // zones belong to the pane and actually receive the press.
+    int resizeEdgeAt(const QPointF& pos) const;
     void layoutContent();
     void askThenClose();
 
@@ -92,7 +97,8 @@ private:
     Drag drag_ = Drag::None;
     QPointF dragOrigin_;   // scene pos at press
     QRectF dragGeom_;      // geometry at press
-    int hover_ = 0;        // 0 none, 1 close, 2 zoom, 3 grip
+    int hover_ = 0;        // 0 none, 1 close, 2 zoom, 3 resize
+    int resizeEdges_ = 0;  // edges being dragged during a Drag::Resize
     bool maximised_ = false;
     bool closing_ = false;  // a confirm dialog is already up
 };
