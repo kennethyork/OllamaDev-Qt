@@ -21,6 +21,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QTimer>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 #include "Backend.h"
@@ -154,7 +155,18 @@ private:
 class BrainWidget : public QWidget {
 public:
     explicit BrainWidget(PaneHost& host, QWidget* parent = nullptr) : QWidget(parent), host_(host) {
-        auto* root = new QVBoxLayout(this);
+        // The pane can be dragged small; scroll the control column instead of
+        // clipping it when the map + tiers + probe + tokens don't all fit.
+        auto* outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, 0, 0, 0);
+        auto* scroll = new QScrollArea(this);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        outer->addWidget(scroll);
+
+        auto* inner = new QWidget(scroll);
+        scroll->setWidget(inner);
+        auto* root = new QVBoxLayout(inner);
         root->setContentsMargins(10, 10, 10, 10);
         root->setSpacing(8);
 
