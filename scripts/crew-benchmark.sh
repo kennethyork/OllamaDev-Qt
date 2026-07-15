@@ -27,22 +27,30 @@ fi
 # Each task: a name, the instruction, the file it should produce, and a command
 # that must exit 0 for the task to count as PASSED. Add rows freely — they are the
 # benchmark. Kept tiny and self-checking so a weak local model still has a chance.
+# The instruction is written as an unambiguous WRITE-TO-DISK task — "create a file
+# X in the current directory" — so a single agent uses its edit tool instead of
+# just explaining the code in prose. Both arms get the identical instruction, so
+# the comparison is fair: same task, same model, only the architecture differs.
 TASKS=(
-  "fizzbuzz|Create fizzbuzz.py with a function fizzbuzz(n) returning 'Fizz','Buzz','FizzBuzz' or the number as a string.|fizzbuzz.py|python3 -c 'import fizzbuzz as f; assert f.fizzbuzz(3)==\"Fizz\" and f.fizzbuzz(5)==\"Buzz\" and f.fizzbuzz(15)==\"FizzBuzz\" and f.fizzbuzz(2)==\"2\"'"
-  "palindrome|Create pal.py with is_pal(s) that returns True iff s reads the same forwards and backwards, ignoring case.|pal.py|python3 -c 'import pal; assert pal.is_pal(\"RaceCar\") and not pal.is_pal(\"hello\")'"
-  "wordcount|Create wc.py with count_words(text) returning a dict of lowercased word -> count.|wc.py|python3 -c 'import wc; d=wc.count_words(\"a A b\"); assert d[\"a\"]==2 and d[\"b\"]==1'"
+  "fizzbuzz|In the current directory, create a file named fizzbuzz.py containing a function fizzbuzz(n) that returns 'Fizz','Buzz','FizzBuzz' or the number as a string. Write the file to disk.|fizzbuzz.py|python3 -c 'import fizzbuzz as f; assert f.fizzbuzz(3)==\"Fizz\" and f.fizzbuzz(5)==\"Buzz\" and f.fizzbuzz(15)==\"FizzBuzz\" and f.fizzbuzz(2)==\"2\"'"
+  "palindrome|In the current directory, create a file named pal.py containing is_pal(s) that returns True iff s reads the same forwards and backwards, ignoring case. Write the file to disk.|pal.py|python3 -c 'import pal; assert pal.is_pal(\"RaceCar\") and not pal.is_pal(\"hello\")'"
+  "wordcount|In the current directory, create a file named wc.py containing count_words(text) returning a dict of lowercased word -> count. Write the file to disk.|wc.py|python3 -c 'import wc; d=wc.count_words(\"a A b\"); assert d[\"a\"]==2 and d[\"b\"]==1'"
 )
 
 run_one() {  # <mode> <instruction> <verify>
     local mode="$1" instr="$2" verify="$3"
     local tmp; tmp="$(mktemp -d)"
     ( cd "$tmp" && git init -q && git commit -q --allow-empty -m init )
+    # Isolated HOME per run: with no ~/.ollamadev/workspaces.json there is no "active
+    # workspace" for the CLI to re-root into, so it stays in $tmp (its cwd) instead
+    # of hijacking to whatever project was last open. Without this the single agent
+    # silently ran in the wrong repo and every check failed.
+    local home="$tmp/home"; mkdir -p "$home"
     local start; start="$(date +%s)"
     if [ "$mode" = single ]; then
-        ( cd "$tmp" && "$CLI" --backend ollama "$instr" >/dev/null 2>&1 )
+        ( cd "$tmp" && HOME="$home" "$CLI" --backend ollama "$instr" >/dev/null 2>&1 )
     else
-        # crew, then land everything it produced into the working tree
-        ( cd "$tmp" && "$CLI" crew "$instr" --land auto >/dev/null 2>&1 )
+        ( cd "$tmp" && HOME="$home" "$CLI" crew "$instr" --land auto >/dev/null 2>&1 )
     fi
     local elapsed=$(( $(date +%s) - start ))
     local ok=FAIL
