@@ -844,6 +844,19 @@ void MainWindow::restoreState(const QJsonObject& state) {
                               t.value("cwd").toString(project_), t.value("replay").toString(),
                               geomFromJson(t));
         if (p && t.contains("z")) p->setZValue(t.value("z").toDouble());
+
+        // A CLI pane (a terminal that was running ollamadev/claude/…) comes back as
+        // that CLI, not a bare shell: relaunch its REPL just like addCliTerminal, and
+        // — because the CLI now auto-resumes this folder's session — it picks the
+        // conversation back up. The old scrollback stays painted above as history.
+        const QString kind = t.value("kind").toString();
+        if (p && !kind.isEmpty() && kind != QLatin1String("shell")) {
+            if (auto* term = qobject_cast<TerminalWidget*>(p->content())) {
+                term->setProperty("odvKind", kind);
+                p->setTitle(kind);
+                term->sendText(withOdvCli(kind) + QLatin1Char('\n'));
+            }
+        }
     }
 
     // Every other canvas pane (chat, git, graph, tasks, …). Reopened via the
