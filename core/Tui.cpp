@@ -626,8 +626,25 @@ std::optional<QString> LineEditor::readLine(const Status& status, const QStringL
     box.paint(glyphs, cursor, status, true);
 
     bool running = true;
+    int lastCols = Tui::width();
     while (running) {
+        // Poll rather than block, so a terminal RESIZE — which delivers no keystroke
+        // at all — is noticed and the prompt reflows to the new width, instead of
+        // staying stuck at the old width until the next key. This is what makes the
+        // REPL fill a resized pane in the desktop terminal.
+        {
+            struct pollfd pfd {STDIN_FILENO, POLLIN, 0};
+            if (::poll(&pfd, 1, 150) <= 0) {
+                const int nowCols = Tui::width();
+                if (nowCols != lastCols) {
+                    lastCols = nowCols;
+                    box.paint(glyphs, cursor, status, true);
+                }
+                continue;
+            }
+        }
         const Press p = readKey();
+        lastCols = Tui::width();
         switch (p.key) {
             case Key::Enter: {
                 QString line;
