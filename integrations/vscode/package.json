@@ -1,0 +1,44 @@
+{
+  "name": "ollamadev-bridge",
+  "displayName": "OllamaDev Bridge",
+  "description": "Send the current selection or file to the OllamaDev crew / agent without leaving your editor.",
+  "version": "0.1.0",
+  "publisher": "ollamadev",
+  "license": "AGPL-3.0-or-later",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["AI", "Other"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ollamadev.crew",
+        "title": "OllamaDev: Send task to crew…"
+      },
+      {
+        "command": "ollamadev.askSelection",
+        "title": "OllamaDev: Ask about selection"
+      },
+      {
+        "command": "ollamadev.chatHere",
+        "title": "OllamaDev: Open agent in this folder"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "ollamadev.crew", "group": "ollamadev@1", "when": "editorTextFocus" },
+        { "command": "ollamadev.askSelection", "group": "ollamadev@2", "when": "editorHasSelection" }
+      ]
+    },
+    "configuration": {
+      "title": "OllamaDev",
+      "properties": {
+        "ollamadev.path": {
+          "type": "string",
+          "default": "ollamadev",
+          "description": "Path to the ollamadev CLI (defaults to whatever is on PATH)."
+        }
+      }
+    }
+  }
+}
