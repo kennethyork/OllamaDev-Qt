@@ -691,13 +691,31 @@ void TerminalWidget::wheelEvent(QWheelEvent* e) {
         e->ignore();
         return;
     }
-    const int dy = e->angleDelta().y();
-    if (dy == 0) return;
-    const int max = int(vt_.scrollback().size());
-    const int next = std::clamp(viewOffset_ + (dy > 0 ? kWheelLines : -kWheelLines), 0, max);
-    if (next != viewOffset_) {
-        viewOffset_ = next;
-        update();
+    // How many lines to scroll. A mouse wheel reports angleDelta in eighths of a
+    // degree (120 == one notch); a Wayland / touchpad high-res device reports
+    // pixelDelta instead, frequently with angleDelta().y() == 0 — which the old
+    // code dropped, killing terminal scrolling entirely under Wayland (the deb/rpm
+    // path). Prefer pixels, converted through the line height, and carry the
+    // sub-line remainder so a slow drag still eventually scrolls.
+    int lines = 0;
+    const QPoint pd = e->pixelDelta();
+    if (!pd.isNull()) {
+        wheelAccum_ += pd.y();
+        const int lh = std::max(1, int(cellH_));
+        lines = wheelAccum_ / lh;
+        wheelAccum_ -= lines * lh;
+    } else {
+        wheelAccum_ += e->angleDelta().y();
+        lines = (wheelAccum_ / 120) * kWheelLines;
+        wheelAccum_ %= 120;
+    }
+    if (lines != 0) {
+        const int max = int(vt_.scrollback().size());
+        const int next = std::clamp(viewOffset_ + lines, 0, max);
+        if (next != viewOffset_) {
+            viewOffset_ = next;
+            update();
+        }
     }
     e->accept();
 }

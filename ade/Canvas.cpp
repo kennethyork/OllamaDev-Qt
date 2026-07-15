@@ -275,8 +275,14 @@ void Canvas::mouseReleaseEvent(QMouseEvent* e) {
 
 void Canvas::wheelEvent(QWheelEvent* e) {
     if (e->modifiers() & Qt::ControlModifier) {
-        zoomBy(e->angleDelta().y() > 0 ? 1.1 : 0.9, e->position().toPoint());
-        e->accept();
+        // angleDelta is empty on a Wayland/touchpad high-res device — fall back to
+        // pixelDelta so ctrl-zoom still has a direction there. Ignore a genuine
+        // zero (a horizontal-only event) rather than zooming out by default.
+        const int dir = e->angleDelta().y() ? e->angleDelta().y() : e->pixelDelta().y();
+        if (dir != 0) {
+            zoomBy(dir > 0 ? 1.1 : 0.9, e->position().toPoint());
+            e->accept();
+        }
         return;
     }
 

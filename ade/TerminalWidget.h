@@ -103,6 +103,8 @@ private:
     QColor selBg_{0x2F, 0x6F, 0xEB};
 
     int viewOffset_ = 0;  // lines scrolled back from the bottom; 0 = live
+    int wheelAccum_ = 0;  // leftover wheel delta below one line — kept so slow
+                          // high-res (Wayland/touchpad) scrolling isn't rounded away
 
     // Selection anchors are ABSOLUTE line numbers, not viewport rows, so a drag that
     // scrolls (or output arriving mid-drag) doesn't smear the selection onto
