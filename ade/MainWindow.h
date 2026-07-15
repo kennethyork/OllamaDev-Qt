@@ -81,8 +81,15 @@ private:
     // id is already on the canvas). Shared by the Add menu and session restore.
     Pane* addRegistryPane(const struct PaneSpec& spec, const QString& id, const QRectF& geom);
     QWidget* buildSettingsWidget();
+    QWidget* buildCrewBanner();  // the (initially hidden) crew-resume strip
 
     void status(const QString& msg);
+
+    // A slim, dismissible banner offering to resume a crew run that was interrupted
+    // in THIS project (matched by the run's saved cwd). Non-modal on purpose — a
+    // crew must never silently restart, but a one-click resume shouldn't be buried
+    // in the CLI either. Called after every session load / project switch.
+    void offerCrewResumeIfAny();
 
     // ---- session (~/.ollamadev/workspaces.json, same schema as the PHP app) ----
     static QString workspacesFile();
@@ -93,6 +100,9 @@ private:
     void saveSession();
 
     Canvas* canvas_ = nullptr;
+    QWidget* crewBanner_ = nullptr;    // hidden until an interrupted run is found
+    QLabel* crewBannerText_ = nullptr;
+    QString crewResumeId_;             // the run the banner's Resume button will resume
     BoardPane* board_ = nullptr;
     EditorPane* editor_ = nullptr;
     FilesPane* files_ = nullptr;

@@ -119,6 +119,10 @@ void writePlan(const QString& runId, const QString& task, const QString& focus, 
     QJsonObject o{{"task", task},       {"focus", focus},     {"land", land},
                   {"audit", f.audit},   {"learn", f.learn},   {"route", f.route},
                   {"debate", f.debate}, {"dedupe", f.dedupe}, {"amplify", f.amplify},
+                  // The project this run belongs to, so a launcher can offer to resume
+                  // only the runs that match the folder you just opened. crew is run
+                  // with cwd == the project, so currentPath() is that project.
+                  {"cwd", QDir::currentPath()},
                   {"subtasks", arr}};
     writeFile(runDir(runId) + "/plan.json", QString::fromUtf8(json::encode(o)));
 }
@@ -1233,6 +1237,7 @@ QVector<Crew::RunInfo> Crew::resumable() {
         RunInfo info;
         info.runId = id;
         info.task = plan.value("task").toString();
+        info.cwd = plan.value("cwd").toString();
         const QJsonArray subs = plan.value("subtasks").toArray();
         info.total = subs.size();
         if (id == liveId) {

@@ -26,6 +26,7 @@
 #include <QFileDialog>
 #include <QShortcut>
 #include <QFormLayout>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -52,6 +53,7 @@
 #include "CommandPalette.h"
 #include "PaneRegistry.h"
 #include "Config.h"
+#include "Crew.h"
 #include "EditorPane.h"
 #include "FilesPane.h"
 #include "ManageDialogs.h"
@@ -179,9 +181,18 @@ MainWindow::MainWindow(const QString& startupPath, QWidget* parent) : QMainWindo
     registerExtraPanes();  // populate the registry before the Add menu is built
 
     canvas_ = new Canvas(this);
-    setCentralWidget(canvas_);
     connect(canvas_, &Canvas::paneClosed, this, &MainWindow::onPaneClosed);
     connect(canvas_, &Canvas::contextMenuRequestedAt, this, &MainWindow::onCanvasContextMenu);
+
+    // Central column: a slim crew-resume banner (hidden until offered) stacked above
+    // the canvas, so the banner can appear without floating over or shrinking panes.
+    auto* central = new QWidget(this);
+    auto* col = new QVBoxLayout(central);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(0);
+    col->addWidget(buildCrewBanner());
+    col->addWidget(canvas_, 1);
+    setCentralWidget(central);
 
     buildTopBar();
     statusBar()->showMessage(tr("ready"));
@@ -194,6 +205,7 @@ MainWindow::MainWindow(const QString& startupPath, QWidget* parent) : QMainWindo
     pingOllama();
 
     loadSession();
+    offerCrewResumeIfAny();
 
     autosave_ = new QTimer(this);
     autosave_->setInterval(4000);
@@ -617,6 +629,68 @@ QWidget* MainWindow::buildSettingsWidget() {
     return w;
 }
 
+// The crew-resume strip: a label plus Resume / Dismiss, hidden until an
+// interrupted run for this project is found. Built once; offerCrewResumeIfAny()
+// fills in the text and shows it.
+QWidget* MainWindow::buildCrewBanner() {
+    const Theme::Colors c = Theme::currentColors();
+    crewBanner_ = new QFrame(this);
+    crewBanner_->setStyleSheet(
+        QStringLiteral("QFrame{background:%1;border-bottom:1px solid %2}")
+            .arg(c.bg2.name(), c.border.name()));
+    auto* row = new QHBoxLayout(crewBanner_);
+    row->setContentsMargins(12, 6, 10, 6);
+    row->setSpacing(8);
+
+    crewBannerText_ = new QLabel(crewBanner_);
+    crewBannerText_->setTextFormat(Qt::PlainText);
+    row->addWidget(crewBannerText_, 1);
+
+    auto* resume = new QPushButton(tr("Resume"), crewBanner_);
+    resume->setProperty("cta", true);
+    auto* dismiss = new QPushButton(tr("Dismiss"), crewBanner_);
+    row->addWidget(resume);
+    row->addWidget(dismiss);
+
+    connect(resume, &QPushButton::clicked, this, [this] {
+        // Open a CLI pane that finishes the run from plan.json — keeps what's done,
+        // re-plans only the leftover work. Same path as `ollamadev crew resume <id>`.
+        if (!crewResumeId_.isEmpty())
+            runInTerminal(QStringLiteral("ollamadev crew resume ") + crewResumeId_);
+        crewBanner_->hide();
+    });
+    connect(dismiss, &QPushButton::clicked, this, [this] { crewBanner_->hide(); });
+
+    crewBanner_->hide();
+    return crewBanner_;
+}
+
+// Offer to resume ONLY a run that was interrupted in THIS project. current.json
+// still existing (with unfinished subtasks) is the signal an in-flight run was cut
+// off — a clean finish leaves done == total. A completed or other-project run never
+// shows a banner, so this can never nag about work that is already done.
+void MainWindow::offerCrewResumeIfAny() {
+    if (!crewBanner_) return;
+    crewResumeId_.clear();
+    crewBanner_->hide();
+
+    const QString liveId = Crew::boardState().value(QStringLiteral("runId")).toString();
+    if (liveId.isEmpty()) return;  // no in-flight run recorded
+
+    for (const Crew::RunInfo& r : Crew::resumable()) {  // newest first
+        if (r.runId != liveId) continue;                // only the in-flight run has live progress
+        if (r.cwd != project_) return;                  // …and only if it belongs to this project
+        if (r.total > 0 && r.done >= r.total) return;   // it actually finished — nothing to resume
+        crewResumeId_ = r.runId;
+        const QString task = r.task.trimmed().isEmpty() ? tr("a crew run") : r.task.trimmed();
+        crewBannerText_->setText(
+            tr("A crew run was interrupted here — “%1”  (%2/%3 subtasks done)")
+                .arg(task.left(70)).arg(r.done).arg(r.total));
+        crewBanner_->show();
+        return;
+    }
+}
+
 void MainWindow::onPaneClosed(const QString& id) {
     if (id == viewPaneId("board")) board_ = nullptr;
     else if (id == viewPaneId("editor")) editor_ = nullptr;
@@ -801,6 +875,7 @@ void MainWindow::openProject(const QString& path) {
 
     restoring_ = false;
     loadSession();  // this project's own saved layout, or a fresh one
+    offerCrewResumeIfAny();  // and any crew run interrupted in this project
     status(tr("opened %1").arg(abs));
 }
 

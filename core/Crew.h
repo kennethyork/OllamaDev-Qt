@@ -178,6 +178,7 @@ public:
     struct RunInfo {
         QString runId;
         QString task;
+        QString cwd;  // the project the run belongs to (empty for pre-cwd runs)
         int done = 0;
         int total = 0;
     };
