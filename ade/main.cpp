@@ -10,12 +10,22 @@
 
 #include <QApplication>
 
+#include <csignal>
+
 #include "Config.h"
 #include "MainWindow.h"
 #include "Theme.h"
 #include "Tools.h"
 
 int main(int argc, char** argv) {
+    // A GUI must outlive the terminal it was launched from. Launch the ADE from a
+    // shell in its own repo, then run an agent/crew (or a build, or just close the
+    // tab) and that shell's session delivers SIGHUP — whose DEFAULT action is to
+    // terminate, taking the whole canvas with it. Ignore it: the window's ✕ and
+    // Quit are the only ways to close the app. SIGTERM is left alone so a normal
+    // `kill` still works, and the atomic autosave means even that keeps the layout.
+    ::signal(SIGHUP, SIG_IGN);
+
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("OllamaDev");
     QCoreApplication::setApplicationName("OllamaDev ADE");
