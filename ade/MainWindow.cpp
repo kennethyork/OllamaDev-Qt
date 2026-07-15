@@ -29,6 +29,8 @@
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonParseError>
+#include <QSaveFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -982,11 +984,25 @@ void MainWindow::saveSession() {
     const QString path = workspacesFile();
     QDir().mkpath(QFileInfo(path).absolutePath());
 
+    // Read the existing file so we only rewrite THIS project's slice and leave every
+    // other workspace (and any CLI/PHP-written fields) untouched.
     QJsonObject doc;
     QFile in(path);
     if (in.open(QIODevice::ReadOnly)) {
-        doc = QJsonDocument::fromJson(in.readAll()).object();
+        const QByteArray bytes = in.readAll();
         in.close();
+        QJsonParseError err{};
+        const QJsonDocument parsed = QJsonDocument::fromJson(bytes, &err);
+        if (err.error == QJsonParseError::NoError) {
+            doc = parsed.object();
+        } else if (!bytes.trimmed().isEmpty()) {
+            // The file has bytes but won't parse — a truncated write from an older
+            // build that saved non-atomically, or a half-written file. Overwriting it
+            // blind would erase every OTHER workspace it still holds, so preserve a
+            // copy once for recovery instead of silently clobbering it.
+            const QString bak = path + QStringLiteral(".corrupt");
+            if (!QFileInfo::exists(bak)) QFile::copy(path, bak);
+        }
     }
 
     QJsonArray list = doc.value("workspaces").toArray();
@@ -1013,9 +1029,17 @@ void MainWindow::saveSession() {
     doc.insert("workspaces", list);
     doc.insert("active", wsId_);
 
-    QFile out(path);
-    if (out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    // Atomic write: QSaveFile writes a temp file and renames it into place, so a
+    // crash or a kill mid-write leaves the PREVIOUS good file intact instead of a
+    // truncated one that fails to parse and wipes the whole restore. autosave calls
+    // this every few seconds, so an interrupted write here was the likeliest way to
+    // lose a layout — the packaged app just hits it more when a GPU/driver crash
+    // restarts it. Session::save already writes this way; the canvas needs it too.
+    QSaveFile out(path);
+    if (out.open(QIODevice::WriteOnly)) {
         out.write(QJsonDocument(doc).toJson(QJsonDocument::Indented));
+        out.commit();
+    }
 }
 
 // ---- quit ------------------------------------------------------------------
