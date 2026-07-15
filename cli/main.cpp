@@ -154,7 +154,8 @@ void syncCurrentProject() {
     if (activeId.isEmpty()) return;
     for (const Workspace& w : all)
         if (w.id == activeId) {
-            if (QFileInfo(w.path).isDir()) QDir::setCurrent(w.path);
+            if (QFileInfo(w.path).isDir() && QDir::setCurrent(w.path))
+                Config::load();  // the followed project may carry its own ./.ollamadev.json
             return;
         }
 }
@@ -1101,6 +1102,11 @@ int cmdTranscribe(const QStringList& args) {
 }
 
 int cmdOneShot(const QString& prompt, const QStringList& args) {
+    // A one-shot follows the shared current project too: run it from an unrelated
+    // dir and it works in (and edits) the active workspace, same as the REPL. Must
+    // run before backend/model resolve any project-local config or the thread root.
+    syncCurrentProject();
+
     const QString backend =
         flagValue(args, "--backend", Config::str("model.backend", "ollama"));
     QString model = flagValue(args, "--model", flagValue(args, "-m"));
