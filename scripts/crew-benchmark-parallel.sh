@@ -35,7 +35,7 @@ MODULES=(
 N="${#MODULES[@]}"
 
 build_task() {
-    local t="In the current directory, create these ${N} independent C++ header files, each defining exactly the stated function, and write every file to disk:"
+    local t="In the current directory, create these ${N} independent C++ header files, each defining exactly the stated function, each defined INLINE (header-only, no separate .cpp), and write every file to disk:"
     local m header sig _
     for m in "${MODULES[@]}"; do
         IFS='|' read -r header sig _ <<<"$m"

@@ -31,9 +31,9 @@ fi
 # compiled against that header and must exit 0. The instruction states the exact
 # signature so the fixed harness lines up. Add rows freely — they are the benchmark.
 TASKS=(
-  "add|In the current directory, create a C++ header file add.hpp defining a function int add(int a, int b) that returns a+b. Write the file to disk.|add.hpp|assert(add(2,3)==5); assert(add(-2,2)==0);"
-  "clamp|In the current directory, create a C++ header file clamp.hpp defining int clamp_int(int x, int lo, int hi) that returns x clamped into [lo,hi]. Write the file to disk.|clamp.hpp|assert(clamp_int(5,0,10)==5); assert(clamp_int(-3,0,10)==0); assert(clamp_int(99,0,10)==10);"
-  "palindrome|In the current directory, create a C++ header file pal.hpp that includes <string> and defines bool is_palindrome(const std::string& s), true iff s reads the same forwards and backwards. Write the file to disk.|pal.hpp|assert(is_palindrome(std::string(\"racecar\"))); assert(!is_palindrome(std::string(\"hello\")));"
+  "add|In the current directory, create a C++ header file add.hpp defining a function int add(int a, int b) that returns a+b. Define the function INLINE in the header (header-only, no separate .cpp). Write the file to disk.|add.hpp|assert(add(2,3)==5); assert(add(-2,2)==0);"
+  "clamp|In the current directory, create a C++ header file clamp.hpp defining int clamp_int(int x, int lo, int hi) that returns x clamped into [lo,hi]. Define the function INLINE in the header (header-only, no separate .cpp). Write the file to disk.|clamp.hpp|assert(clamp_int(5,0,10)==5); assert(clamp_int(-3,0,10)==0); assert(clamp_int(99,0,10)==10);"
+  "palindrome|In the current directory, create a C++ header file pal.hpp that includes <string> and defines bool is_palindrome(const std::string& s), true iff s reads the same forwards and backwards. Define the function INLINE in the header (header-only, no separate .cpp). Write the file to disk.|pal.hpp|assert(is_palindrome(std::string(\"racecar\"))); assert(!is_palindrome(std::string(\"hello\")));"
 )
 
 # Compile a test main that includes the agent's header and runs the asserts.

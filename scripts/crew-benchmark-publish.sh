@@ -103,13 +103,13 @@ for row in "${SMALL[@]}"; do
     IFS='|' read -r header instr body <<<"$row"
     _SCORE_HEADER="$header"; _SCORE_BODY="$body"
     scorer_small() { check_one "$1" "$_SCORE_HEADER" "$_SCORE_BODY" && echo 1 || echo 0; }
-    read -r sp sm ss <<<"$(cell single "In the current directory, $instr. Write the file to disk." scorer_small 1)"
-    read -r cp cm cs <<<"$(cell crew   "In the current directory, $instr. Write the file to disk." scorer_small 1)"
+    read -r sp sm ss <<<"$(cell single "In the current directory, $instr. Define it INLINE in the header (header-only, no separate .cpp). Write the file to disk." scorer_small 1)"
+    read -r cp cm cs <<<"$(cell crew   "In the current directory, $instr. Define it INLINE in the header (header-only, no separate .cpp). Write the file to disk." scorer_small 1)"
     printf "%-10s | %-18s | %-18s\n" "${header%.hpp}" "$sp/$TRIALS · ${sm}±${ss}s" "$cp/$TRIALS · ${cm}±${cs}s"
 done
 
 # ---- Tier B: parallelism on 4 expensive independent subtasks ----------------
-BIG_TASK="In the current directory, create these 4 independent C++ header files, each defining exactly the stated function, and write every file to disk:"
+BIG_TASK="In the current directory, create these 4 independent C++ header files, each defining exactly the stated function, each defined INLINE (header-only, no separate .cpp), and write every file to disk:"
 for row in "${BIG[@]}"; do
     IFS='|' read -r header sig _ <<<"$row"
     BIG_TASK="$BIG_TASK"$'\n'"- $header defining $sig"
