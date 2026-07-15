@@ -2,6 +2,7 @@ add_library(odv-core STATIC
     Version.h
     Json.cpp Json.h
     Config.cpp Config.h
+    Crash.cpp Crash.h
     Parallel.cpp Parallel.h
     Backend.cpp Backend.h
     OllamaBackend.cpp OllamaBackend.h

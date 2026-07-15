@@ -53,6 +53,7 @@
 #include "CommandPalette.h"
 #include "PaneRegistry.h"
 #include "Config.h"
+#include "Crash.h"
 #include "Crew.h"
 #include "EditorPane.h"
 #include "FilesPane.h"
@@ -206,6 +207,12 @@ MainWindow::MainWindow(const QString& startupPath, QWidget* parent) : QMainWindo
 
     loadSession();
     offerCrewResumeIfAny();
+
+    // If the last run died on a fatal signal, say so once — the layout was just
+    // restored, so this reads as reassurance ("it came back"), not alarm.
+    if (const QString crash = Crash::takeLastCrash(); !crash.isEmpty())
+        status(tr("Last session ended unexpectedly (%1) — your canvas was restored.")
+                   .arg(crash.section(':', 1).trimmed()));
 
     autosave_ = new QTimer(this);
     autosave_->setInterval(4000);

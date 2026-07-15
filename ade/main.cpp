@@ -13,6 +13,7 @@
 #include <csignal>
 
 #include "Config.h"
+#include "Crash.h"
 #include "MainWindow.h"
 #include "Theme.h"
 #include "Tools.h"
@@ -25,6 +26,10 @@ int main(int argc, char** argv) {
     // Quit are the only ways to close the app. SIGTERM is left alone so a normal
     // `kill` still works, and the atomic autosave means even that keeps the layout.
     ::signal(SIGHUP, SIG_IGN);
+
+    // Leave a breadcrumb if we die on a fatal signal, so a mid-run crash isn't a
+    // silent mystery next launch.
+    odv::Crash::install(QStringLiteral("ade"));
 
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("OllamaDev");
