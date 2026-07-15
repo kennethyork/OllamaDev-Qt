@@ -10,11 +10,15 @@
 
 #include "StartPane.h"
 
+#include <QFrame>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include "Config.h"
+#include "Onboard.h"
 #include "Theme.h"
 
 namespace odv {
@@ -38,6 +42,8 @@ public:
 
         auto* title = new QLabel(tr("<h2>OllamaDev</h2>"), this);
         root->addWidget(title);
+
+        root->addWidget(hardwareCard());
 
         root->addWidget(section(tr("Get set up")));
         auto* setup = new QGridLayout;
@@ -86,6 +92,59 @@ public:
     }
 
 private:
+    // Reads the machine's VRAM/RAM and recommends a model that fits — the same
+    // hardware probe the `setup` CLI uses, surfaced so a first-run GUI user isn't
+    // left guessing which of a dozen Ollama tags their box can actually run. One
+    // click pulls it and makes it the default.
+    QWidget* hardwareCard() {
+        const Theme::Colors c = Theme::currentColors();
+        const Onboard::HwInfo hw = Onboard::detectHw();
+        const Onboard::Recommendation rec = Onboard::recommend(hw);
+
+        auto* card = new QFrame(this);
+        card->setStyleSheet(QStringLiteral("QFrame{background:%1;border:1px solid %2;"
+                                           "border-radius:8px;}")
+                                .arg(c.bg2.name(), c.border.name()));
+        auto* v = new QVBoxLayout(card);
+        v->setContentsMargins(14, 12, 14, 12);
+        v->setSpacing(6);
+
+        auto* machine = new QLabel(
+            tr("<b>This machine:</b> %1").arg(hw.summary.toHtmlEscaped()), card);
+        v->addWidget(machine);
+
+        auto* recL = new QLabel(
+            tr("<b>Recommended model:</b> %1 <span style='color:%3'>— %2</span>")
+                .arg(rec.tag.toHtmlEscaped(), rec.why.toHtmlEscaped(), c.faint.name()),
+            card);
+        recL->setWordWrap(true);
+        v->addWidget(recL);
+
+        auto* row = new QHBoxLayout;
+        auto* pull = new QPushButton(tr("Pull & use %1").arg(rec.tag), card);
+        pull->setProperty("cta", true);
+        pull->setCursor(Qt::PointingHandCursor);
+        connect(pull, &QPushButton::clicked, this, [this, tag = rec.tag] {
+            Config::setPref(QStringLiteral("ollama.defaultModel"), tag);
+            host_.runInTerminal(QStringLiteral("ollamadev pull ") + tag);
+            host_.setStatus(tr("Pulling %1 and setting it as the default…").arg(tag));
+        });
+        row->addWidget(pull);
+        if (!rec.stronger.isEmpty()) {
+            auto* strong = new QPushButton(tr("…or the stronger %1").arg(rec.stronger), card);
+            strong->setCursor(Qt::PointingHandCursor);
+            connect(strong, &QPushButton::clicked, this, [this, tag = rec.stronger] {
+                Config::setPref(QStringLiteral("ollama.defaultModel"), tag);
+                host_.runInTerminal(QStringLiteral("ollamadev pull ") + tag);
+                host_.setStatus(tr("Pulling %1…").arg(tag));
+            });
+            row->addWidget(strong);
+        }
+        row->addStretch(1);
+        v->addLayout(row);
+        return card;
+    }
+
     QLabel* section(const QString& text) {
         auto* l = new QLabel(QStringLiteral("<b>%1</b>").arg(text.toHtmlEscaped()), this);
         l->setStyleSheet(QStringLiteral("color:%1;").arg(Theme::currentColors().dim.name()));
