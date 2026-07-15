@@ -29,6 +29,7 @@
 #include "Board.h"
 #include "CodeIndex.h"
 #include "Config.h"
+#include "Crash.h"
 #include "ContextTuner.h"
 #include "Crew.h"
 #include "Eval.h"
@@ -2922,6 +2923,7 @@ int cmdCompletion(const QStringList& args) {
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     Config::load();
+    Crash::install(QStringLiteral("cli"));
     Tools::registerAll();
 
     QStringList args = QCoreApplication::arguments();
@@ -3113,6 +3115,33 @@ int main(int argc, char** argv) {
         if (sub == "role") return cmdCrewRole(rest.mid(1));
         if (sub == "pack") return cmdCrewPack(rest.mid(1));
         if (sub == "resume") return cmdCrewResume(rest.mid(1));
+        if (sub == "export") {
+            // crew export [runId] [outfile] — a shareable Markdown record. No id ==
+            // the newest run; no outfile == stdout.
+            QString runId = rest.value(1);
+            if (runId.isEmpty() || runId.startsWith('-')) {
+                const auto runs = Crew::resumable();
+                if (runs.isEmpty()) {
+                    err() << "no runs to export\n"; err().flush(); return 1;
+                }
+                runId = runs.first().runId;
+            }
+            const QString md = Crew::exportRun(runId);
+            if (md.isEmpty()) {
+                err() << "no such run: " << runId << "\n"; err().flush(); return 1;
+            }
+            const QString outFile = rest.value(2);
+            if (outFile.isEmpty() || outFile.startsWith('-')) {
+                out() << md; out().flush(); return 0;
+            }
+            QFile f(outFile);
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                err() << "cannot write " << outFile << "\n"; err().flush(); return 1;
+            }
+            f.write(md.toUtf8());
+            out() << "✓ exported " << runId << " → " << outFile << "\n"; out().flush();
+            return 0;
+        }
         if (sub == "accept") {
             if (Crew::accept(rest.value(1).toInt(), &e)) {
                 out() << "✓ applied\n";

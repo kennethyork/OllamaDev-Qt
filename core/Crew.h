@@ -183,6 +183,12 @@ public:
         int total = 0;
     };
     static QVector<RunInfo> resumable();
+
+    // A self-contained Markdown record of a run — the task, the plan (each
+    // subtask's role/model/route/prompt) and, when the run is the current one,
+    // each coder's final state. Shareable as a single file so a teammate can
+    // review what the crew did without the machine it ran on. Empty if no such run.
+    static QString exportRun(const QString& runId);
 };
 
 }  // namespace odv

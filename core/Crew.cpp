@@ -1215,6 +1215,51 @@ void Crew::clearBoard() {
     Board::clear();
 }
 
+QString Crew::exportRun(const QString& runId) {
+    const QJsonObject plan = readPlan(runId);
+    if (plan.isEmpty()) return {};
+
+    // Final per-coder states live in current.json, but only for the run that is (or
+    // last was) current; a completed/older run exports its plan without them.
+    const QJsonObject live = boardState();
+    QHash<int, QString> stateOf;
+    if (live.value("runId").toString() == runId) {
+        for (const auto& v : live.value("subtasks").toArray()) {
+            const auto o = v.toObject();
+            stateOf.insert(o.value("n").toInt(), o.value("state").toString());
+        }
+    }
+
+    QString md;
+    md += QStringLiteral("# Crew run %1\n\n").arg(runId);
+    md += QStringLiteral("**Task:** %1\n\n").arg(plan.value("task").toString());
+    const QString focus = plan.value("focus").toString();
+    if (!focus.isEmpty()) md += QStringLiteral("**Focus:** %1\n\n").arg(focus);
+    md += QStringLiteral("**Settings:** land=%1 · audit=%2 · debate=%3 · dedupe=%4 · amplify=%5\n\n")
+              .arg(plan.value("land").toString(QStringLiteral("auto")))
+              .arg(plan.value("audit").toBool() ? "on" : "off")
+              .arg(plan.value("debate").toBool() ? "on" : "off")
+              .arg(plan.value("dedupe").toBool() ? "on" : "off")
+              .arg(plan.value("amplify").toInt(1));
+
+    const QJsonArray subs = plan.value("subtasks").toArray();
+    md += QStringLiteral("## Plan — %1 subtask(s)\n\n").arg(subs.size());
+    for (const auto& v : subs) {
+        const QJsonObject s = v.toObject();
+        const int n = s.value("n").toInt();
+        const QString state = stateOf.value(n, s.value("state").toString(QStringLiteral("planned")));
+        md += QStringLiteral("### #%1 — %2  `[%3]`\n").arg(n).arg(s.value("title").toString(), state);
+        md += QStringLiteral("- role: %1 · model: %2/%3 · route: %4\n\n")
+                  .arg(s.value("role").toString(), s.value("backend").toString(),
+                       s.value("model").toString(),
+                       s.value("route").toString(QStringLiteral("—")));
+        const QString prompt = s.value("prompt").toString().trimmed();
+        if (!prompt.isEmpty())
+            md += QStringLiteral("> %1\n\n").arg(QString(prompt).replace("\n", "\n> "));
+    }
+    return md;
+}
+
 QVector<Crew::RunInfo> Crew::resumable() {
     // The one live run current.json points at carries real per-coder state; for
     // any other run on disk we only know the plan, so "done" reads 0 there.
