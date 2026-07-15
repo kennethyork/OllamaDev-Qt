@@ -493,7 +493,13 @@ Crew::Result Crew::run(const CrewOptions& opts, const CrewEvents& ev, const Canc
     // ---- Sandboxes: one full copy of the project per coder -----------------
     phase("sandbox", QStringLiteral("preparing %1 sandboxes").arg(subs.size()));
     const QString wtRoot = QDir::tempPath() + "/ollamadev-crew/" + runId;
-    const QString csRoot = Config::dataDir() + "/crew/" + runId + "/changeset";
+    // The changeset store must OUTLIVE the run — held work is accepted later, maybe
+    // after the project folder moved or a temp checkout was cleaned. So it lives in
+    // the durable global run dir (~/.ollamadev/crew/<runId>), NOT under the project's
+    // transient dataDir; the board records this absolute path, and Sandbox::apply
+    // reads it back whenever you click Accept. Putting it under dataDir was the bug
+    // behind "Accept does nothing": a per-project/temp store that had since vanished.
+    const QString csRoot = runDir(runId) + "/changeset";
     QVector<QString> sandboxes(subs.size());
     QVector<QString> stores(subs.size());
     QVector<CoderResult> results(subs.size());
